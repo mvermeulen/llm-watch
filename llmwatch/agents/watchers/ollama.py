@@ -20,7 +20,7 @@ from llmwatch.agents.base import AgentResult, BaseAgent, registry
 
 logger = logging.getLogger(__name__)
 
-_OLLAMA_LIBRARY_URL = "https://ollama.com/library"
+_OLLAMA_LIBRARY_URL = "https://ollama.com/search"
 _REQUEST_TIMEOUT = 15
 
 
@@ -45,7 +45,10 @@ class OllamaModelWatcher(BaseAgent):
         try:
             resp = requests.get(
                 _OLLAMA_LIBRARY_URL,
-                headers={"User-Agent": "llm-watch/0.1 (https://github.com/mvermeulen/llm-watch)"},
+                headers={
+                    "User-Agent": "llm-watch/0.1 (https://github.com/mvermeulen/llm-watch)",
+                    "HX-Request": "true",
+                },
                 timeout=_REQUEST_TIMEOUT,
             )
             resp.raise_for_status()
@@ -63,14 +66,6 @@ class OllamaModelWatcher(BaseAgent):
 # HTML parsing helpers
 # ---------------------------------------------------------------------------
 
-# These patterns are intentionally loose so they survive minor HTML changes.
-_MODEL_BLOCK_RE = re.compile(
-    r'href="/([a-zA-Z0-9_\-\.]+)"[^>]*>.*?'
-    r'<(?:h2|span)[^>]*>([^<]+)<',
-    re.DOTALL,
-)
-_DESC_RE = re.compile(r'<p[^>]*class="[^"]*(?:description|text)[^"]*"[^>]*>(.*?)</p>', re.DOTALL)
-_TAG_RE = re.compile(r'<span[^>]*>([\d\.]+[BbKk]?(?:\s*params)?)</span>')
 _STRIP_TAGS_RE = re.compile(r"<[^>]+>")
 
 
@@ -80,54 +75,59 @@ def _strip_tags(html: str) -> str:
 
 def _parse_ollama_library(html: str) -> list[dict[str, Any]]:
     """
-    Parse the Ollama library HTML and return a list of model dicts.
+    Parse the Ollama /search htmx response and return a list of model dicts.
 
-    We look for anchor tags that point to model pages and try to extract
-    the model name and description from the surrounding markup.
+    The page renders model cards as <a href="/library/<model>"> blocks
+    containing the model name in a <span x-test-search-response-title> element,
+    a description in a <p> element, capability badges in
+    <span x-test-capability> elements, and size badges in
+    <span x-test-size> elements.
     """
     data: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    # Find all <li> or <article> blocks that contain a model link
-    # The page uses Next.js so the HTML structure may vary; we use a broad
-    # anchor-based scan.
-    for match in re.finditer(
-        r'href="/([a-zA-Z0-9][a-zA-Z0-9_\-\.]{1,60})"[^>]*>(.*?)(?=href="/[a-zA-Z]|\Z)',
+    for block_match in re.finditer(
+        r'<a\s[^>]*href="/library/([a-zA-Z0-9][a-zA-Z0-9_\-\.]+)"[^>]*>(.*?)(?=<a\s[^>]*href="/library/|\Z)',
         html,
         re.DOTALL,
     ):
-        model_id = match.group(1)
-        block = match.group(2)
-
-        # Skip navigation / non-model paths
-        if any(
-            model_id.startswith(p)
-            for p in ("search", "library", "blog", "docs", "about", "download", "api")
-        ):
-            continue
+        model_id = block_match.group(1)
         if model_id in seen:
             continue
         seen.add(model_id)
 
-        # Extract description
-        desc_match = _DESC_RE.search(block)
+        block = block_match.group(2)
+
+        # Model name from title span
+        name_match = re.search(r'<span\s[^>]*x-test-search-response-title[^>]*>(.*?)</span>', block, re.DOTALL)
+        name = _strip_tags(name_match.group(1)) if name_match else model_id
+
+        # Description from <p> following the title
+        desc_match = re.search(r'<p\s[^>]*>(.*?)</p>', block, re.DOTALL)
         description = _strip_tags(desc_match.group(1)) if desc_match else ""
 
-        # Extract size tags
-        tags = [t.strip() for t in _TAG_RE.findall(block)]
+        # Capability tags (tools, vision, thinking, etc.)
+        capabilities = [
+            _strip_tags(m) for m in re.findall(
+                r'<span\s[^>]*x-test-capability[^>]*>(.*?)</span>', block, re.DOTALL
+            )
+        ]
 
-        # If we found nothing useful, try a plain-text extraction
-        if not description:
-            plain = _strip_tags(block)
-            lines = [l.strip() for l in plain.splitlines() if l.strip()]
-            description = lines[0] if lines else ""
+        # Size tags (3b, 8b, 70b, etc.)
+        sizes = [
+            _strip_tags(m) for m in re.findall(
+                r'<span\s[^>]*x-test-size[^>]*>(.*?)</span>', block, re.DOTALL
+            )
+        ]
+
+        tags = capabilities + sizes
 
         data.append(
             {
-                "model_id": model_id,
+                "model_id": name or model_id,
                 "description": description[:200],
                 "tags": tags,
-                "url": f"https://ollama.com/{model_id}",
+                "url": f"https://ollama.com/library/{model_id}",
                 "source": "ollama",
             }
         )
