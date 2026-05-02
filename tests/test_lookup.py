@@ -6,7 +6,14 @@ import requests
 import responses as resp_lib
 
 from llmwatch.agents.base import AgentResult
-from llmwatch.agents.lookup.arxiv import ArxivLookupAgent, _extract_search_terms, _parse_atom_feed
+from llmwatch.agents.lookup import arxiv as arxiv_mod
+from llmwatch.agents.lookup.arxiv import (
+    ArxivLookupAgent,
+    _cache_first_enabled,
+    _cache_key,
+    _extract_search_terms,
+    _parse_atom_feed,
+)
 
 # Minimal Atom XML that mimics an arXiv API response
 ARXIV_ATOM = """\
@@ -36,7 +43,9 @@ using parameter-efficient techniques.</summary>
 
 class TestArxivLookupAgent:
     @resp_lib.activate
-    def test_successful_lookup_with_context(self):
+    def test_successful_lookup_with_context(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(arxiv_mod, "_CACHE_DIR", str(tmp_path))
+        monkeypatch.setattr(arxiv_mod, "_CACHE_PATH", str(tmp_path / "arxiv_cache.json"))
         resp_lib.add(
             resp_lib.GET,
             "https://export.arxiv.org/api/query",
@@ -66,7 +75,9 @@ class TestArxivLookupAgent:
         assert "published" in paper
 
     @resp_lib.activate
-    def test_fallback_default_query_when_no_context(self):
+    def test_fallback_default_query_when_no_context(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(arxiv_mod, "_CACHE_DIR", str(tmp_path))
+        monkeypatch.setattr(arxiv_mod, "_CACHE_PATH", str(tmp_path / "arxiv_cache.json"))
         resp_lib.add(
             resp_lib.GET,
             "https://export.arxiv.org/api/query",
@@ -82,7 +93,9 @@ class TestArxivLookupAgent:
         assert isinstance(result.data, list)
 
     @resp_lib.activate
-    def test_network_error_recorded_in_errors(self):
+    def test_network_error_recorded_in_errors(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(arxiv_mod, "_CACHE_DIR", str(tmp_path))
+        monkeypatch.setattr(arxiv_mod, "_CACHE_PATH", str(tmp_path / "arxiv_cache.json"))
         resp_lib.add(
             resp_lib.GET,
             "https://export.arxiv.org/api/query",
@@ -103,7 +116,9 @@ class TestArxivLookupAgent:
 
         assert len(result.errors) >= 1
 
-    def test_deduplicates_papers(self):
+    def test_deduplicates_papers(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(arxiv_mod, "_CACHE_DIR", str(tmp_path))
+        monkeypatch.setattr(arxiv_mod, "_CACHE_PATH", str(tmp_path / "arxiv_cache.json"))
         resp_lib.start()
         try:
             resp_lib.add(
@@ -138,6 +153,94 @@ class TestArxivLookupAgent:
         finally:
             resp_lib.stop()
             resp_lib.reset()
+
+    def test_uses_cache_before_fetch(self, monkeypatch, tmp_path):
+        cache_file = tmp_path / "arxiv_cache.json"
+        monkeypatch.setattr(arxiv_mod, "_CACHE_DIR", str(tmp_path))
+        monkeypatch.setattr(arxiv_mod, "_CACHE_PATH", str(cache_file))
+
+        term = "Llama Alpha"
+        key = _cache_key(term)
+        arxiv_mod._save_cache(
+            {
+                key: [
+                    {
+                        "title": "Cached Paper",
+                        "authors": "A. Author",
+                        "summary": "cached",
+                        "url": "https://arxiv.org/abs/9999.00001",
+                        "published": "2026-01-01",
+                        "query": term,
+                    }
+                ]
+            }
+        )
+
+        called = {"count": 0}
+
+        def fake_query(*args, **kwargs):
+            called["count"] += 1
+            return []
+
+        monkeypatch.setattr(arxiv_mod, "_query_arxiv", fake_query)
+
+        agent = ArxivLookupAgent()
+        result = agent.run(
+            context={
+                "watcher_results": [
+                    AgentResult(agent_name="w", category="watcher", data=[{"model_id": term}])
+                ]
+            }
+        )
+
+        assert called["count"] == 0
+        assert any(p["title"] == "Cached Paper" for p in result.data)
+
+    def test_force_fetch_bypasses_cache(self, monkeypatch, tmp_path):
+        cache_file = tmp_path / "arxiv_cache.json"
+        monkeypatch.setattr(arxiv_mod, "_CACHE_DIR", str(tmp_path))
+        monkeypatch.setattr(arxiv_mod, "_CACHE_PATH", str(cache_file))
+
+        term = "Llama Alpha"
+        key = _cache_key(term)
+        arxiv_mod._save_cache(
+            {
+                key: [
+                    {
+                        "title": "Cached Paper",
+                        "authors": "A. Author",
+                        "summary": "cached",
+                        "url": "https://arxiv.org/abs/9999.00001",
+                        "published": "2026-01-01",
+                        "query": term,
+                    }
+                ]
+            }
+        )
+
+        def fake_query(query, max_results=3):
+            return [
+                {
+                    "title": "Fresh Paper",
+                    "authors": "B. Author",
+                    "summary": "fresh",
+                    "url": "https://arxiv.org/abs/9999.00002",
+                    "published": "2026-01-02",
+                    "query": query,
+                }
+            ]
+
+        monkeypatch.setattr(arxiv_mod, "_query_arxiv", fake_query)
+
+        agent = ArxivLookupAgent()
+        result = agent.run(
+            context={
+                "watcher_results": [AgentResult(agent_name="w", category="watcher", data=[{"model_id": term}])],
+                "options": {"arxiv_force_fetch": True},
+            }
+        )
+
+        assert any(p["title"] == "Fresh Paper" for p in result.data)
 
 
 class TestExtractSearchTerms:
@@ -209,3 +312,16 @@ class TestParseAtomFeed:
         )
         papers = _parse_atom_feed(empty_atom, "test")
         assert papers == []
+
+
+class TestCacheHelpers:
+    def test_cache_key_normalizes_case_and_spaces(self):
+        assert _cache_key("  LLaMA   3  ") == "llama 3"
+
+    def test_cache_first_enabled_defaults_true(self):
+        assert _cache_first_enabled(None) is True
+        assert _cache_first_enabled({}) is True
+
+    def test_cache_first_enabled_honors_force_fetch_option(self):
+        ctx = {"options": {"arxiv_force_fetch": True}}
+        assert _cache_first_enabled(ctx) is False

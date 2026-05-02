@@ -45,9 +45,11 @@ class Orchestrator:
         self,
         parallel: bool = True,
         output_dir: str | None = ".",
+        lookup_options: dict[str, Any] | None = None,
     ) -> None:
         self.parallel = parallel
         self.output_dir = output_dir
+        self.lookup_options = lookup_options or {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -71,7 +73,10 @@ class Orchestrator:
         watcher_results = self._run_phase("watcher")
 
         # ---- Phase 2: lookup -------------------------------------------- #
-        lookup_context: dict[str, Any] = {"watcher_results": watcher_results}
+        lookup_context: dict[str, Any] = {
+            "watcher_results": watcher_results,
+            "options": self.lookup_options,
+        }
         lookup_results = self._run_phase("lookup", context=lookup_context)
 
         # ---- Phase 3: reporter ------------------------------------------ #

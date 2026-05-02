@@ -141,6 +141,65 @@ class TestWeeklyReporterAgent:
         model_lines = [l for l in report.splitlines() if "org/model-" in l]
         assert len(model_lines) <= 15
 
+    def test_tldr_non_trending_routed_to_analysis_section(self):
+        agent = WeeklyReporterAgent()
+        ctx = {
+            "watcher_results": [
+                _make_watcher_result(
+                    "tldr_ai",
+                    [
+                        {
+                            "model_id": "KV Cache Locality",
+                            "url": "https://example.com/kv-cache",
+                            "description": "Latency and throughput deep dive.",
+                            "tags": ["Deep Dives & Analysis"],
+                            "source": "tldr_ai",
+                            "include_in_trending": False,
+                            "tldr_local_category": "model_analysis",
+                        }
+                    ],
+                )
+            ],
+            "lookup_results": [],
+        }
+
+        result = agent.run(context=ctx)
+        report = result.data[0]["report"]
+
+        assert "TLDR Model Analysis" in report
+        assert "KV Cache Locality" in report
+        assert "Trending & New Models" in report
+        trending_lines = [l for l in report.splitlines() if "KV Cache Locality" in l and l.startswith("- ")]
+        assert len(trending_lines) == 1
+
+    def test_tldr_non_trending_routed_to_other_news_section(self):
+        agent = WeeklyReporterAgent()
+        ctx = {
+            "watcher_results": [
+                _make_watcher_result(
+                    "tldr_ai",
+                    [
+                        {
+                            "model_id": "Anthropic Valuation Update",
+                            "url": "https://example.com/valuation",
+                            "description": "Funding and valuation round details.",
+                            "tags": ["Headlines & Launches"],
+                            "source": "tldr_ai",
+                            "include_in_trending": False,
+                            "tldr_local_category": "other",
+                        }
+                    ],
+                )
+            ],
+            "lookup_results": [],
+        }
+
+        result = agent.run(context=ctx)
+        report = result.data[0]["report"]
+
+        assert "TLDR Other AI News" in report
+        assert "Anthropic Valuation Update" in report
+
 
 class TestSourceLabel:
     def test_known_agents(self):

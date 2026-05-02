@@ -52,6 +52,15 @@ llm-watch --no-parallel --verbose
 
 # Write report to a custom directory
 llm-watch --output-dir /path/to/reports
+
+# Force fresh arXiv lookups (ignore cached lookup results)
+llm-watch --arxiv-force-fetch
+
+# Fetch and cache TLDR updates only (no report generation)
+llm-watch --tldr-fetch-only
+
+# Fetch TLDR data for a specific date range and merge with cache
+llm-watch --tldr-fetch-only --tldr-date-range "2026-04-25:2026-05-02"
 ```
 
 Or run as a module:
@@ -59,6 +68,60 @@ Or run as a module:
 ```bash
 python -m llmwatch.main [options]
 ```
+
+### arXiv Lookup Caching
+
+The arXiv lookup agent uses a local cache by default to reduce timeouts and
+network calls.
+
+- Cache file: `.llmwatch_cache/arxiv_lookup_cache.json`
+- Default behavior: look up each normalized query term in cache first
+- Override behavior: use `--arxiv-force-fetch` to bypass cache and fetch all
+   terms directly from arXiv
+
+### TLDR Local Hybrid Filter (Ollama)
+
+TLDR items use a hybrid classifier:
+
+- Primary: local Ollama classification for whether an item belongs in
+   `Trending & New Models`
+- Fallback: keyword-based rules when Ollama is unavailable or returns invalid
+   output
+
+TLDR items are cached so daily fetches can be merged into less-frequent reports.
+
+- Cache file: `.llmwatch_cache/tldr_items.json`
+- Fetch-only mode: `--tldr-fetch-only` updates the TLDR cache without generating
+  a report
+- Weekly/full report runs read merged cached TLDR items from recent history
+
+#### Fetching TLDR Data for a Date Range
+
+Use `--tldr-date-range` with `--tldr-fetch-only` to backfill TLDR data from
+previous days:
+
+```bash
+# Fetch and cache TLDR data from April 25 to May 2
+llm-watch --tldr-fetch-only --tldr-date-range "2026-04-25:2026-05-02"
+
+# Output: "TLDR cache updated: 50 item(s) for date range 2026-04-25 to 2026-05-02."
+```
+
+The date range format is ISO 8601 (`YYYY-MM-DD:YYYY-MM-DD`):
+- Start and end dates are both **inclusive**
+- The range skips dates where no edition is published (404 or redirect responses)
+- All fetched items are merged with the existing cache and deduplicated by URL
+- Cache retention is still governed by `LLMWATCH_TLDR_HISTORY_DAYS`
+
+Use this feature to catch up on missed daily updates or to backfill the cache
+when starting fresh.
+
+Environment knobs:
+
+- `LLMWATCH_TLDR_OLLAMA_FILTER` (default: enabled)
+- `LLMWATCH_TLDR_FILTER_MODEL` (default: `llama3.2:3b`)
+- `LLMWATCH_OLLAMA_API_URL` (default: `http://localhost:11434/api/generate`)
+- `LLMWATCH_TLDR_HISTORY_DAYS` (default: `14`)
 
 ## Adding a new agent
 

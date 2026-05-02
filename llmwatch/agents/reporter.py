@@ -53,27 +53,87 @@ class WeeklyReporterAgent(BaseAgent):
         lines.append("## Trending & New Models")
         lines.append("")
 
+        tldr_analysis_items: list[dict[str, Any]] = []
+        tldr_other_items: list[dict[str, Any]] = []
+
         if not watcher_results:
             lines.append("*No watcher data available this week.*")
             lines.append("")
         else:
-            for w_result in watcher_results:
+            # Sort results to show tldr_ai first, then others in registration order
+            sorted_results = sorted(
+                watcher_results,
+                key=lambda r: (r.agent_name != "tldr_ai", watcher_results.index(r))
+            )
+            for w_result in sorted_results:
                 if not w_result.data:
                     continue
                 source_label = _source_label(w_result.agent_name)
                 lines.append(f"### {source_label}")
                 lines.append("")
-                for item in w_result.data[:15]:  # cap at 15 per source
+                shown = 0
+                for item in w_result.data:
                     model_id = item.get("model_id", item.get("name", "Unknown"))
                     url = item.get("url", "")
                     desc = item.get("description", "")
                     tags = item.get("tags", [])
+                    source = item.get("source", "")
+
+                    # TLDR items can be routed to secondary sections.
+                    if source == "tldr_ai":
+                        include_in_trending = bool(item.get("include_in_trending", True))
+                        local_category = str(item.get("tldr_local_category", "other"))
+                        if not include_in_trending:
+                            if local_category == "model_analysis":
+                                tldr_analysis_items.append(item)
+                            else:
+                                tldr_other_items.append(item)
+                            continue
+
+                    if shown >= 15:
+                        continue
 
                     link = f"[{model_id}]({url})" if url else f"**{model_id}**"
-                    tag_str = f" `{'` `'.join(str(t) for t in tags[:4])}`" if tags else ""
                     desc_str = f" – {desc}" if desc else ""
-                    lines.append(f"- {link}{tag_str}{desc_str}")
+                    
+                    # For TLDR items, put the single category tag at the end
+                    if source == "tldr_ai" and tags:
+                        category = tags[0]  # TLDR items have exactly one tag
+                        lines.append(f"- {link}{desc_str} `{category}`")
+                    else:
+                        # For other sources, keep tags inline
+                        tag_str = f" `{'` `'.join(str(t) for t in tags[:4])}`" if tags else ""
+                        lines.append(f"- {link}{tag_str}{desc_str}")
+                    shown += 1
                 lines.append("")
+
+        if tldr_analysis_items:
+            lines.append("## TLDR Model Analysis")
+            lines.append("")
+            for item in tldr_analysis_items[:20]:
+                model_id = item.get("model_id", item.get("name", "Unknown"))
+                url = item.get("url", "")
+                desc = item.get("description", "")
+                tags = item.get("tags", [])
+                link = f"[{model_id}]({url})" if url else f"**{model_id}**"
+                desc_str = f" – {desc}" if desc else ""
+                category = tags[0] if tags else "General"
+                lines.append(f"- {link}{desc_str} `{category}`")
+            lines.append("")
+
+        if tldr_other_items:
+            lines.append("## TLDR Other AI News")
+            lines.append("")
+            for item in tldr_other_items[:20]:
+                model_id = item.get("model_id", item.get("name", "Unknown"))
+                url = item.get("url", "")
+                desc = item.get("description", "")
+                tags = item.get("tags", [])
+                link = f"[{model_id}]({url})" if url else f"**{model_id}**"
+                desc_str = f" – {desc}" if desc else ""
+                category = tags[0] if tags else "General"
+                lines.append(f"- {link}{desc_str} `{category}`")
+            lines.append("")
 
         # ------------------------------------------------------------------ #
         # Section 2: Related research papers
@@ -156,6 +216,7 @@ class WeeklyReporterAgent(BaseAgent):
 
 def _source_label(agent_name: str) -> str:
     labels = {
+        "tldr_ai": "TLDR AI – Daily Newsletter",
         "huggingface_trending": "HuggingFace – Trending Models",
         "ollama_models": "Ollama – Model Library",
     }

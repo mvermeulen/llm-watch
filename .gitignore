@@ -214,5 +214,8 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# llm-watch runtime cache
+.llmwatch_cache/
+
 # Streamlit
 .streamlit/secrets.toml

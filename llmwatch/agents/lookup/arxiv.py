@@ -9,7 +9,9 @@ arXiv API documentation: https://info.arxiv.org/help/api/index.html
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import re
 import xml.etree.ElementTree as ET
 from typing import Any
@@ -24,6 +26,8 @@ logger = logging.getLogger(__name__)
 _ARXIV_API_URL = "https://export.arxiv.org/api/query"
 _MAX_RESULTS_PER_QUERY = 3
 _REQUEST_TIMEOUT = 20
+_CACHE_DIR = ".llmwatch_cache"
+_CACHE_PATH = os.path.join(_CACHE_DIR, "arxiv_lookup_cache.json")
 
 # arXiv Atom namespace
 _ATOM_NS = "http://www.w3.org/2005/Atom"
@@ -56,25 +60,41 @@ class ArxivLookupAgent(BaseAgent):
     max_terms: int = 10
 
     def run(self, context: dict[str, Any] | None = None) -> AgentResult:
+        cache_first = _cache_first_enabled(context)
         terms = _extract_search_terms(context)
         if not terms:
             logger.info("ArxivLookupAgent: no search terms from context – using default query")
             terms = ["large language model"]
 
         terms = terms[: self.max_terms]
-        logger.info("ArxivLookupAgent: querying arXiv for %d term(s): %s", len(terms), terms)
+        logger.info(
+            "ArxivLookupAgent: resolving %d term(s) with cache_first=%s: %s",
+            len(terms),
+            cache_first,
+            terms,
+        )
 
         all_data: list[dict[str, Any]] = []
         errors: list[str] = []
+        cache = _load_cache()
 
         for term in terms:
+            cache_key = _cache_key(term)
+            if cache_first and cache_key in cache:
+                logger.info("ArxivLookupAgent: cache hit for term '%s'", term)
+                all_data.extend(cache[cache_key])
+                continue
+
             try:
                 papers = _query_arxiv(term)
                 all_data.extend(papers)
+                cache[cache_key] = papers
             except requests.RequestException as exc:
                 msg = f"arXiv query failed for '{term}': {exc}"
                 logger.warning(msg)
                 errors.append(msg)
+
+        _save_cache(cache)
 
         # De-duplicate by URL
         seen: set[str] = set()
@@ -114,6 +134,44 @@ def _extract_search_terms(context: dict[str, Any] | None) -> list[str]:
                     terms.append(short)
 
     return terms
+
+
+def _cache_first_enabled(context: dict[str, Any] | None) -> bool:
+    """Return True unless lookup options explicitly request force-fetch."""
+    if not context:
+        return True
+    options = context.get("options", {})
+    if not isinstance(options, dict):
+        return True
+    return not bool(options.get("arxiv_force_fetch", False))
+
+
+def _cache_key(term: str) -> str:
+    return re.sub(r"\s+", " ", term.strip().lower())
+
+
+def _load_cache() -> dict[str, list[dict[str, Any]]]:
+    """Load cached arXiv results from disk; return an empty cache on errors."""
+    if not os.path.exists(_CACHE_PATH):
+        return {}
+    try:
+        with open(_CACHE_PATH, "r", encoding="utf-8") as fh:
+            cache = json.load(fh)
+        if isinstance(cache, dict):
+            return cache
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("ArxivLookupAgent: failed to load cache: %s", exc)
+    return {}
+
+
+def _save_cache(cache: dict[str, list[dict[str, Any]]]) -> None:
+    """Persist cache to disk. Errors are non-fatal for report generation."""
+    try:
+        os.makedirs(_CACHE_DIR, exist_ok=True)
+        with open(_CACHE_PATH, "w", encoding="utf-8") as fh:
+            json.dump(cache, fh, ensure_ascii=False, indent=2)
+    except OSError as exc:
+        logger.warning("ArxivLookupAgent: failed to save cache: %s", exc)
 
 
 def _query_arxiv(query: str, max_results: int = _MAX_RESULTS_PER_QUERY) -> list[dict[str, Any]]:
