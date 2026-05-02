@@ -51,7 +51,7 @@ class HuggingFaceTrendingWatcher(BaseAgent):
         try:
             resp = requests.get(
                 _HF_API_URL,
-                params={"sort": "trending", "limit": self.limit, "full": "False"},
+                params={"sort": "trendingScore", "direction": -1, "limit": self.limit},
                 timeout=_REQUEST_TIMEOUT,
             )
             resp.raise_for_status()
