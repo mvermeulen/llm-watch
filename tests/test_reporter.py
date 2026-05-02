@@ -1,0 +1,194 @@
+"""
+Unit tests for the weekly reporter agent.
+"""
+
+from llmwatch.agents.base import AgentResult
+from llmwatch.agents.reporter import WeeklyReporterAgent, _collect_new_sources, _source_label
+
+
+def _make_watcher_result(agent_name: str, models: list[dict]) -> AgentResult:
+    return AgentResult(
+        agent_name=agent_name,
+        category="watcher",
+        data=models,
+    )
+
+
+def _make_lookup_result(papers: list[dict]) -> AgentResult:
+    return AgentResult(
+        agent_name="arxiv_lookup",
+        category="lookup",
+        data=papers,
+    )
+
+
+class TestWeeklyReporterAgent:
+    def test_generates_markdown_report(self):
+        agent = WeeklyReporterAgent()
+        ctx = {
+            "watcher_results": [
+                _make_watcher_result(
+                    "huggingface_trending",
+                    [
+                        {
+                            "model_id": "mistralai/Mistral-7B",
+                            "url": "https://huggingface.co/mistralai/Mistral-7B",
+                            "description": "A fast model.",
+                            "tags": ["text-generation"],
+                            "source": "huggingface",
+                        }
+                    ],
+                )
+            ],
+            "lookup_results": [
+                _make_lookup_result(
+                    [
+                        {
+                            "title": "Mistral: A Powerful LLM",
+                            "url": "https://arxiv.org/abs/1234.56789",
+                            "authors": "Doe, J.",
+                            "published": "2024-01-01",
+                            "summary": "Abstract text.",
+                            "query": "Mistral",
+                        }
+                    ]
+                )
+            ],
+        }
+        result = agent.run(context=ctx)
+
+        assert result.ok()
+        assert result.agent_name == "weekly_reporter"
+        assert len(result.data) == 1
+        report = result.data[0]["report"]
+        assert "# LLM Watch" in report
+        assert "Mistral-7B" in report
+        assert "Mistral: A Powerful LLM" in report
+        assert "date" in result.data[0]
+
+    def test_report_with_no_context(self):
+        agent = WeeklyReporterAgent()
+        result = agent.run(context={})
+        assert result.ok()
+        report = result.data[0]["report"]
+        assert "No watcher data available" in report
+        assert "No papers retrieved" in report
+
+    def test_report_includes_errors_section(self):
+        agent = WeeklyReporterAgent()
+        ctx = {
+            "watcher_results": [
+                AgentResult(
+                    agent_name="huggingface_trending",
+                    category="watcher",
+                    data=[],
+                    errors=["API timed out"],
+                )
+            ],
+            "lookup_results": [],
+        }
+        result = agent.run(context=ctx)
+        report = result.data[0]["report"]
+        assert "Warnings" in report
+        assert "API timed out" in report
+
+    def test_report_includes_new_sources_section(self):
+        agent = WeeklyReporterAgent()
+        ctx = {
+            "watcher_results": [
+                AgentResult(
+                    agent_name="huggingface_trending",
+                    category="watcher",
+                    data=[
+                        {
+                            "model_id": "test/model",
+                            "url": "https://huggingface.co/test/model",
+                            "description": "See https://newblog.example.com/post",
+                            "tags": [],
+                            "source": "huggingface",
+                        }
+                    ],
+                    new_sources=["https://newblog.example.com/post"],
+                )
+            ],
+            "lookup_results": [],
+        }
+        result = agent.run(context=ctx)
+        report = result.data[0]["report"]
+        assert "New Sources Discovered" in report
+        assert "https://newblog.example.com/post" in report
+
+    def test_report_caps_models_per_source(self):
+        """Reporter should cap at 15 models per source."""
+        agent = WeeklyReporterAgent()
+        many_models = [
+            {
+                "model_id": f"org/model-{i}",
+                "url": f"https://huggingface.co/org/model-{i}",
+                "description": "",
+                "tags": [],
+                "source": "huggingface",
+            }
+            for i in range(30)
+        ]
+        ctx = {
+            "watcher_results": [_make_watcher_result("huggingface_trending", many_models)],
+            "lookup_results": [],
+        }
+        result = agent.run(context=ctx)
+        report = result.data[0]["report"]
+        # Count model lines
+        model_lines = [l for l in report.splitlines() if "org/model-" in l]
+        assert len(model_lines) <= 15
+
+
+class TestSourceLabel:
+    def test_known_agents(self):
+        assert "HuggingFace" in _source_label("huggingface_trending")
+        assert "Ollama" in _source_label("ollama_models")
+
+    def test_unknown_agent_falls_back_to_title_case(self):
+        label = _source_label("my_custom_agent")
+        assert label == "My Custom Agent"
+
+
+class TestCollectNewSources:
+    def test_extracts_external_urls(self):
+        results = [
+            AgentResult(
+                agent_name="hf",
+                category="watcher",
+                data=[{"description": "Check https://coolsite.example.com/info"}],
+                new_sources=["https://another.example.net"],
+            )
+        ]
+        sources = _collect_new_sources(results)
+        assert "https://coolsite.example.com/info" in sources
+        assert set(sources) >= {"https://another.example.net"}
+
+    def test_filters_known_domains(self):
+        results = [
+            AgentResult(
+                agent_name="hf",
+                category="watcher",
+                data=[{"url": "https://huggingface.co/test"}],
+                new_sources=["https://github.com/repo"],
+            )
+        ]
+        sources = _collect_new_sources(results)
+        # huggingface.co and github.com should be filtered out
+        assert "https://huggingface.co/test" not in sources
+        assert "https://github.com/repo" not in sources
+
+    def test_deduplicates(self):
+        url = "https://unique.example.com/page"
+        results = [
+            AgentResult(
+                agent_name="hf",
+                category="watcher",
+                data=[{"description": url}, {"description": url}],
+                new_sources=[url],
+            )
+        ]
+        sources = _collect_new_sources(results)
+        assert sources.count(url) == 1

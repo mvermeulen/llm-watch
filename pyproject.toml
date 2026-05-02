@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-watch"
+version = "0.1.0"
+description = "A system of agents that monitor the world of large language models and create weekly reports"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.12",
+    "responses>=0.25",
+]
+
+[project.scripts]
+llm-watch = "llmwatch.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["llmwatch*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
