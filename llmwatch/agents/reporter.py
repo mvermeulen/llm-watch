@@ -1,0 +1,196 @@
+"""
+Reporter agent – aggregates all watcher and lookup results into a weekly
+investigation report formatted as Markdown.
+
+The reporter also scans data for previously-unseen URLs and surfaces them
+as "new sources to explore" in the report.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from datetime import date
+from typing import Any
+
+from llmwatch.agents.base import AgentResult, BaseAgent, registry
+
+logger = logging.getLogger(__name__)
+
+_URL_RE = re.compile(r"https?://[^\s\"'<>)\]]+")
+
+
+class WeeklyReporterAgent(BaseAgent):
+    """
+    Aggregate watcher and lookup results into a weekly Markdown report.
+
+    Reads ``context["watcher_results"]`` and ``context["lookup_results"]``
+    (both lists of :class:`~llmwatch.agents.base.AgentResult`) and produces a
+    single :class:`~llmwatch.agents.base.AgentResult` whose ``data`` list
+    contains one item::
+
+        {"report": "<markdown string>", "date": "YYYY-MM-DD"}
+    """
+
+    name = "weekly_reporter"
+    category = "reporter"
+
+    def run(self, context: dict[str, Any] | None = None) -> AgentResult:
+        context = context or {}
+        watcher_results: list[AgentResult] = context.get("watcher_results", [])
+        lookup_results: list[AgentResult] = context.get("lookup_results", [])
+
+        today = date.today().isoformat()
+        lines: list[str] = []
+
+        lines.append(f"# LLM Watch – Weekly Investigation Report")
+        lines.append(f"*Generated: {today}*")
+        lines.append("")
+
+        # ------------------------------------------------------------------ #
+        # Section 1: Trending / new models
+        # ------------------------------------------------------------------ #
+        lines.append("## Trending & New Models")
+        lines.append("")
+
+        if not watcher_results:
+            lines.append("*No watcher data available this week.*")
+            lines.append("")
+        else:
+            for w_result in watcher_results:
+                if not w_result.data:
+                    continue
+                source_label = _source_label(w_result.agent_name)
+                lines.append(f"### {source_label}")
+                lines.append("")
+                for item in w_result.data[:15]:  # cap at 15 per source
+                    model_id = item.get("model_id", item.get("name", "Unknown"))
+                    url = item.get("url", "")
+                    desc = item.get("description", "")
+                    tags = item.get("tags", [])
+
+                    link = f"[{model_id}]({url})" if url else f"**{model_id}**"
+                    tag_str = f" `{'` `'.join(str(t) for t in tags[:4])}`" if tags else ""
+                    desc_str = f" – {desc}" if desc else ""
+                    lines.append(f"- {link}{tag_str}{desc_str}")
+                lines.append("")
+
+        # ------------------------------------------------------------------ #
+        # Section 2: Related research papers
+        # ------------------------------------------------------------------ #
+        lines.append("## Related Research Papers (arXiv)")
+        lines.append("")
+
+        all_papers: list[dict[str, Any]] = []
+        for l_result in lookup_results:
+            all_papers.extend(l_result.data)
+
+        if not all_papers:
+            lines.append("*No papers retrieved this week.*")
+            lines.append("")
+        else:
+            # Group papers by query term for readability
+            by_query: dict[str, list[dict]] = {}
+            for paper in all_papers:
+                q = paper.get("query", "general")
+                by_query.setdefault(q, []).append(paper)
+
+            for query, papers in by_query.items():
+                lines.append(f"### Query: *{query}*")
+                lines.append("")
+                for paper in papers:
+                    title = paper.get("title", "Untitled")
+                    url = paper.get("url", "")
+                    authors = paper.get("authors", "")
+                    published = paper.get("published", "")
+                    summary = paper.get("summary", "")
+
+                    link = f"[{title}]({url})" if url else f"**{title}**"
+                    meta = " | ".join(filter(None, [authors, published]))
+                    lines.append(f"- {link}")
+                    if meta:
+                        lines.append(f"  *{meta}*")
+                    if summary:
+                        lines.append(f"  {summary}")
+                    lines.append("")
+
+        # ------------------------------------------------------------------ #
+        # Section 3: Errors / warnings
+        # ------------------------------------------------------------------ #
+        all_errors = [
+            e
+            for result in (watcher_results + lookup_results)
+            for e in result.errors
+        ]
+        if all_errors:
+            lines.append("## Warnings")
+            lines.append("")
+            for err in all_errors:
+                lines.append(f"- ⚠️ {err}")
+            lines.append("")
+
+        # ------------------------------------------------------------------ #
+        # Section 4: New sources discovered
+        # ------------------------------------------------------------------ #
+        new_sources = _collect_new_sources(watcher_results + lookup_results)
+        if new_sources:
+            lines.append("## New Sources Discovered")
+            lines.append("")
+            lines.append(
+                "The following URLs were found in model descriptions or paper "
+                "abstracts and may be worth monitoring:"
+            )
+            lines.append("")
+            for src in new_sources[:20]:
+                lines.append(f"- {src}")
+            lines.append("")
+
+        report_text = "\n".join(lines)
+        logger.info("WeeklyReporterAgent: report generated (%d chars)", len(report_text))
+        return self._result(data=[{"report": report_text, "date": today}])
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _source_label(agent_name: str) -> str:
+    labels = {
+        "huggingface_trending": "HuggingFace – Trending Models",
+        "ollama_models": "Ollama – Model Library",
+    }
+    return labels.get(agent_name, agent_name.replace("_", " ").title())
+
+
+def _collect_new_sources(results: list[AgentResult]) -> list[str]:
+    """Gather unique external URLs from all agent results."""
+    seen: set[str] = set()
+    sources: list[str] = []
+    # Known hosting domains we do NOT want to surface as "new"
+    known = {"huggingface.co", "ollama.com", "arxiv.org", "github.com"}
+
+    for result in results:
+        for url in result.new_sources:
+            domain = _domain(url)
+            if domain and domain not in known and url not in seen:
+                seen.add(url)
+                sources.append(url)
+        # Also scan text fields in the data items
+        for item in result.data:
+            for field_value in item.values():
+                if isinstance(field_value, str):
+                    for url in _URL_RE.findall(field_value):
+                        domain = _domain(url)
+                        if domain and domain not in known and url not in seen:
+                            seen.add(url)
+                            sources.append(url)
+    return sources
+
+
+def _domain(url: str) -> str:
+    m = re.match(r"https?://([^/]+)", url)
+    return m.group(1).lstrip("www.") if m else ""
+
+
+# Register a default instance in the global registry.
+registry.register(WeeklyReporterAgent())
