@@ -164,7 +164,7 @@ class TestCollectNewSources:
         ]
         sources = _collect_new_sources(results)
         assert "https://coolsite.example.com/info" in sources
-        assert "https://another.example.net" in sources
+        assert set(sources) >= {"https://another.example.net"}
 
     def test_filters_known_domains(self):
         results = [
