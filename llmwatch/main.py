@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # ---- Import agents (triggers auto-registration) ---------------------- #
-    from llmwatch.agents.watchers import huggingface, ollama  # noqa: F401
+    from llmwatch.agents.watchers import huggingface, ollama, tldr_ai  # noqa: F401
     from llmwatch.agents.lookup import arxiv  # noqa: F401
     from llmwatch.agents import reporter  # noqa: F401
     from llmwatch.agents.base import registry
