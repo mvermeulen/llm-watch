@@ -12,9 +12,10 @@ llmwatch/
 ├── agents/
 │   ├── base.py            # BaseAgent, AgentResult, AgentRegistry (registry singleton)
 │   ├── watchers/
-│   │   ├── huggingface.py # Watches HuggingFace trending models
-│   │   ├── neuron_feed.py # Watches The Neuron Atom feed (feed-first mode)
-│   │   └── ollama.py      # Watches the Ollama model library
+│   │   ├── huggingface.py        # Watches HuggingFace trending models
+│   │   ├── huggingface_papers.py # Watches HuggingFace trending papers
+│   │   ├── neuron_feed.py        # Watches The Neuron Atom feed (feed-first mode)
+│   │   └── ollama.py             # Watches the Ollama model library
 │   ├── lookup/
 │   │   └── arxiv.py       # Looks up arXiv papers for discovered models
 │   └── reporter.py        # Aggregates findings into a weekly Markdown report
@@ -26,7 +27,7 @@ llmwatch/
 
 | Phase      | Agents           | Description                                                  |
 |------------|------------------|--------------------------------------------------------------|
-| `watcher`  | HuggingFace, Ollama, The Neuron | Fetch trending/new models from public sources |
+| `watcher`  | HuggingFace Models, HuggingFace Papers, Ollama, The Neuron | Fetch trending/new models/papers from public sources |
 | `lookup`   | arXiv            | Search for papers related to discovered models               |
 | `reporter` | WeeklyReporter   | Aggregate everything into a Markdown report                  |
 

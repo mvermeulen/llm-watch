@@ -58,6 +58,7 @@ class WeeklyReporterAgent(BaseAgent):
         lwiai_summary_items: list[dict[str, Any]] = []
         lwiai_link_items: list[dict[str, Any]] = []
         neuron_summary_items: list[dict[str, Any]] = []
+        hf_papers_items: list[dict[str, Any]] = []
 
         if not watcher_results:
             lines.append("*No watcher data available this week.*")
@@ -91,6 +92,10 @@ class WeeklyReporterAgent(BaseAgent):
 
                     if source == "neuron":
                         neuron_summary_items.append(item)
+                        continue
+
+                    if source == "huggingface_papers":
+                        hf_papers_items.append(item)
                         continue
 
                     # TLDR items can be routed to secondary sections.
@@ -164,6 +169,28 @@ class WeeklyReporterAgent(BaseAgent):
                 meta_str = f" ({' | '.join(meta_parts)})" if meta_parts else ""
                 summary_str = f" – {summary}" if summary else ""
                 lines.append(f"- {link}{meta_str}{summary_str}")
+            lines.append("")
+
+        if hf_papers_items:
+            lines.append("## HuggingFace Trending Papers")
+            lines.append("")
+            for item in hf_papers_items[:30]:
+                title = item.get("model_id", "Untitled")
+                url = item.get("url", "")
+                summary = item.get("description", "")
+                published = item.get("published", "")
+                authors = item.get("authors", "")
+                upvotes = item.get("upvotes", 0)
+
+                link = f"[{title}]({url})" if url else f"**{title}**"
+                meta_parts = [part for part in [published, f"{upvotes} upvotes"] if part]
+                meta_str = f" ({' | '.join(meta_parts)})" if meta_parts else ""
+                if authors:
+                    authors_str = f"\n  *Authors: {authors}*"
+                else:
+                    authors_str = ""
+                summary_str = f"\n  {summary}" if summary else ""
+                lines.append(f"- {link}{meta_str}{authors_str}{summary_str}")
             lines.append("")
 
         if tldr_analysis_items:
@@ -279,6 +306,7 @@ def _source_label(agent_name: str) -> str:
         "lastweekinai_podcast": "Last Week in AI – Podcast",
         "neuron_feed": "The Neuron – Feed",
         "huggingface_trending": "HuggingFace – Trending Models",
+        "huggingface_trending_papers": "HuggingFace – Trending Papers",
         "ollama_models": "Ollama – Model Library",
     }
     return labels.get(agent_name, agent_name.replace("_", " ").title())
