@@ -165,6 +165,30 @@ challenges.
 - Categories tracked by default: `newsletter`, `explainer-articles`
 - Lookback control: `--neuron-lookback-days`
 
+### Common Links Ranking and Suppression
+
+The `story_consolidator` and `weekly_reporter` pipeline builds a `Common Links`
+section that prioritizes useful repeated links while suppressing noisy repeats.
+
+- Ranking signal combines:
+   - source-class diversity (for example newsletter + podcast)
+   - source diversity and appearance count
+   - freshness and novelty adjustments
+- Buckets rendered in report:
+   - `High Signal Common Links`
+   - `Repeated References`
+   - `Suppressed Repeated Links`
+- Link metadata shown in report includes `Type` and `Coverage`
+
+Environment knobs:
+
+- `LLMWATCH_CONSOLIDATOR_SIMILARITY_THRESHOLD` (default: `0.85`)
+- `LLMWATCH_CONSOLIDATOR_TEMPORAL_WINDOW_DAYS` (default: `7`)
+- `LLMWATCH_CONSOLIDATOR_SUPPRESS_SPONSORS` (default: `true`)
+- `LLMWATCH_CONSOLIDATOR_SUPPRESS_SOCIAL_SINGLE_SOURCE` (default: `true`)
+- `LLMWATCH_CONSOLIDATOR_SUPPRESS_DOMAINS` (default: empty, comma-separated)
+- `LLMWATCH_CONSOLIDATOR_ALLOW_DOMAINS` (default: empty, comma-separated; overrides suppression)
+
 ## Adding a new agent
 
 1. Create a new file in `llmwatch/agents/watchers/` (or `lookup/`).
@@ -201,8 +225,9 @@ pytest
 Each run produces a Markdown file named `llm_watch_report_YYYY-MM-DD.md` with
 five sections:
 
-1. **Featured Stories This Week** – consolidated cross-source stories ranked by
-   impact score.
+1. **Common Links This Week** – consolidated cross-source links ranked by
+   cross-source signal, split into high-signal, repeated-reference, and
+   suppressed-link subsections.
 2. **Trending & New Models** – models discovered by watcher agents, grouped by
    source.
 3. **Related Research Papers (arXiv)** – papers found by the lookup agent,

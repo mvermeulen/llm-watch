@@ -1,4 +1,4 @@
-# Quick Reference: Featured Stories Consolidation (Active)
+# Quick Reference: Common Links Consolidation (Active)
 
 Status: Active and current as of 2026-05-02
 
@@ -14,7 +14,7 @@ News items appear **2-3 times** across different report sections:
 ## Solution: Consolidator Agent
 A **reporter-phase agent** that:
 1. Detects duplicate stories across sources
-2. Creates "Featured Stories" section with cross-references
+2. Creates "Common Links" section with cross-references
 3. Enriches metadata (impact score, appearance count)
 
 ## Current Implementation
@@ -24,9 +24,9 @@ A **reporter-phase agent** that:
 | File | Status |
 |------|--------|
 | `llmwatch/agents/consolidator.py` | Implemented |
-| `llmwatch/agents/reporter.py` | Updated for Featured Stories rendering |
+| `llmwatch/agents/reporter.py` | Updated for Common Links bucketing + suppression summary |
 | `llmwatch/orchestrator.py` | Updated for sequential reporter execution |
-| `tests/test_consolidator.py` | Implemented (Phase 1 + Phase 2 coverage) |
+| `tests/test_consolidator.py` | Implemented (URL/similarity + ranking/suppression coverage) |
 
 ### Architecture
 
@@ -39,14 +39,14 @@ Reporter Phase (sequential)
     ├─→ StoryConsolidatorAgent
     │       • Input: watcher_results + lookup_results
     │       • Output: consolidated_stories with metadata
-    │       • Algorithm: URL normalization + title similarity
+    │       • Algorithm: URL normalization + title similarity + weighted ranking + suppression
     ├─→ WeeklyReporterAgent (modified)
     │       • Input: + consolidated_stories
-    │       • Output: markdown with "Featured Stories" section
+    │       • Output: markdown with "Common Links" section
     └─→ Other reporters
 ```
 
-## Deduplication Algorithm (Current)
+## Consolidation + Ranking Algorithm (Current)
 
 **Primary match**: Normalize URLs, exact match
 ```python
@@ -62,13 +62,31 @@ title2 = "Grok 4.3 improves cost-efficiency"
 → Similarity: 0.86 ✓ MATCH (if within 7 days)
 ```
 
-Tertiary matching is not implemented yet. Current behavior is URL + title similarity within temporal window.
+Current behavior is URL + title similarity within temporal window, followed by weighted ranking and suppression filtering.
+
+### Ranking Signal (Current)
+
+`common_link_signal` combines:
+
+1. Source-class diversity (newsletter/podcast/model hub/research hub)
+2. Source diversity and appearance count
+3. Freshness score (recent links boosted, stale links penalized)
+4. Novelty score (newly surfaced links lightly boosted, evergreen wide-span links penalized)
+
+### Suppression Rules (Current)
+
+Suppression runs after consolidation and classification:
+
+- Suppress sponsor links by default
+- Suppress single-source social links by default
+- Suppress configured domains
+- Allowlist domains override all suppression rules
 
 ## Output Example
 
-### Featured Stories Section (New)
+### Common Links Section (New)
 ```markdown
-## Featured Stories This Week
+## Common Links This Week
 
 ### 1. xAI Launches Grok 4.3 – Improved Cost-Efficiency 🔥
 **Impact**: Covered by 3 sources | **First reported**: May 2, 2026
@@ -109,18 +127,20 @@ def consolidate_with_similarity(items):
     # Adds: temporal proximity check (same week)
 ```
 
-### Phase 3: Semantic (Ollama enhancement)
-Status: Planned | Coverage target: ~95%+
+### Phase 3: Quality Ranking (Implemented)
+Status: Completed
 
 ```python
 class StoryConsolidatorAgent(BaseAgent):
-    """Current implementation: URL + title similarity consolidation."""
+    """Current implementation: URL + title similarity + weighted common-link ranking."""
     # Implemented:
     # - URL normalization and grouping
     # - SequenceMatcher title similarity (threshold configurable)
     # - Temporal window filtering
     # - Cross-source appearances metadata
-    # - Impact scoring by appearance count
+    # - Source-class weighted scoring
+    # - Freshness/novelty adjustments
+    # - Suppression rules with allowlist override
 ```
 
 ## Key Decision Points
@@ -130,14 +150,19 @@ class StoryConsolidatorAgent(BaseAgent):
 | **Create new agent or in-reporter?** | Implemented as new agent | Cleaner separation of concerns; testable |
 | **Similarity threshold** | 0.85 default, configurable | Reduces false positives; tunable via env var |
 | **Temporal window** | 7 days default, configurable | Stories considered same when temporally close |
-| **Impact metric** | Implemented (appearance count) | Simple and interpretable |
-| **Future: Local AI model** | Planned | Ollama-style semantic deduplication |
+| **Ranking metric** | Implemented (weighted signal) | Prioritizes independent cross-source agreement + recency |
+| **Suppression policy** | Implemented (configurable) | Reduces low-signal recurring links while preserving visibility in summary |
+| **Future: Local AI model** | Planned | Optional semantic deduplication for hard title mismatches |
 
 ### Configuration
 ```python
 # Environment variables for consolidator
 LLMWATCH_CONSOLIDATOR_SIMILARITY_THRESHOLD=0.85  # Configurable 0.0-1.0
 LLMWATCH_CONSOLIDATOR_TEMPORAL_WINDOW_DAYS=7     # Temporal proximity window
+LLMWATCH_CONSOLIDATOR_SUPPRESS_SPONSORS=true
+LLMWATCH_CONSOLIDATOR_SUPPRESS_SOCIAL_SINGLE_SOURCE=true
+LLMWATCH_CONSOLIDATOR_SUPPRESS_DOMAINS=example.com,another.com
+LLMWATCH_CONSOLIDATOR_ALLOW_DOMAINS=trusted.example.com
 LLMWATCH_CONSOLIDATOR_OLLAMA_ENABLED=false       # Future: Enable local ML dedup
 LLMWATCH_CONSOLIDATOR_OLLAMA_MODEL=llama3.2:3b   # Future: Local model for complex cases
 ```
@@ -150,7 +175,9 @@ test_normalize_url()           # URL normalization
 test_title_similarity()        # Similarity matching
 test_consolidate_basic()       # Simple dedup
 test_consolidate_complex()     # Multi-source same story
-test_featured_stories_render() # Markdown generation
+test_common_links_render() # Markdown generation
+test_suppression_rules()       # Sponsor/domain/social suppression + allowlist
+test_freshness_novelty()       # Recency and novelty weighting
 
 # Integration tests (implemented):
 test_end_to_end_with_sample_report()  # Full flow
@@ -173,7 +200,7 @@ Recent run metrics:
 - Phase 1 baseline: 189 items -> 187 unique stories
 - Phase 2 current: 189 items -> 181 unique stories
 - Additional Phase 2 gain: 6 more duplicates consolidated
-- Featured Stories section rendered in report output
+- Common Links section rendered in report output
 
 ## Roadmap
 
@@ -184,13 +211,13 @@ Status: Completed
 - ✓ Create `agents/consolidator.py` with `StoryConsolidatorAgent`
 - ✓ URL normalization & exact matching
 - ✓ Configuration support (similarity threshold, temporal window)
-- ✓ Basic "Featured Stories" section rendering
+- ✓ Basic "Common Links" section rendering
 - ✓ Unit tests for URL normalization
 - ✓ Integration test with sample report
 
 **Definition of Done**:
 - Duplicates by URL are eliminated
-- "Featured Stories" section appears in report
+- "Common Links" section appears in report
 - No regression in existing report sections
 - Configuration can be set via environment variables
 - Tests passing
@@ -222,6 +249,6 @@ Status: Backlog
 
 ## Immediate Next Steps
 
-1. Implement Phase 3 semantic deduplication with optional Ollama integration
-2. Add fallback and timeout behavior tests for Ollama unavailable scenarios
-3. Optionally exclude sponsor items from Featured Stories ranking
+1. Add optional domain-pattern suppression (regex path-level rules)
+2. Add report-level counts for suppressed reasons (sponsor/domain/social)
+3. Prototype optional semantic deduplication with Ollama for ambiguous title pairs

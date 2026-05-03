@@ -43,6 +43,16 @@ def _normalize_url(url: str) -> str:
 
 def _get_config() -> dict[str, Any]:
     """Load configuration from environment variables."""
+    suppressed_domains = {
+        d.strip().lower().lstrip("www.")
+        for d in os.getenv("LLMWATCH_CONSOLIDATOR_SUPPRESS_DOMAINS", "").split(",")
+        if d.strip()
+    }
+    allow_domains = {
+        d.strip().lower().lstrip("www.")
+        for d in os.getenv("LLMWATCH_CONSOLIDATOR_ALLOW_DOMAINS", "").split(",")
+        if d.strip()
+    }
     return {
         "similarity_threshold": float(
             os.getenv("LLMWATCH_CONSOLIDATOR_SIMILARITY_THRESHOLD", "0.85")
@@ -52,6 +62,13 @@ def _get_config() -> dict[str, Any]:
         ),
         "ollama_enabled": os.getenv("LLMWATCH_CONSOLIDATOR_OLLAMA_ENABLED", "false").lower() == "true",
         "ollama_model": os.getenv("LLMWATCH_CONSOLIDATOR_OLLAMA_MODEL", "llama3.2:3b"),
+        "suppressed_domains": suppressed_domains,
+        "allow_domains": allow_domains,
+        "suppress_sponsors": os.getenv("LLMWATCH_CONSOLIDATOR_SUPPRESS_SPONSORS", "true").lower() == "true",
+        "suppress_social_single_source": os.getenv(
+            "LLMWATCH_CONSOLIDATOR_SUPPRESS_SOCIAL_SINGLE_SOURCE", "true"
+        ).lower()
+        == "true",
     }
 
 
@@ -83,6 +100,232 @@ class StoryConsolidatorAgent(BaseAgent):
     
     def __init__(self):
         self.config = _get_config()
+
+    def _source_class(self, source: str) -> str:
+        """Map watcher source name to a broad source class for diversity scoring."""
+        mapping = {
+            "tldr_ai": "newsletter",
+            "neuron_feed": "newsletter",
+            "lastweekinai_podcast": "podcast",
+            "lwiai": "podcast",
+            "huggingface_trending": "model_hub",
+            "huggingface_trending_papers": "research_hub",
+            "ollama_models": "model_library",
+        }
+        return mapping.get(source, "other")
+
+    def _domain(self, url: str) -> str:
+        if not url:
+            return ""
+        try:
+            return urlparse(url).netloc.lower().lstrip("www.")
+        except Exception:
+            return ""
+
+    def _suppression_reason(self, story: dict[str, Any]) -> str:
+        """Return suppression reason, or empty string if story should be kept."""
+        primary = story.get("primary_item", {})
+        url = primary.get("url", "")
+        domain = self._domain(url)
+        link_type = story.get("common_link_type", "news_story")
+        source_count = story.get("source_count", 0)
+
+        allow_domains = self.config.get("allow_domains", set())
+        suppressed_domains = self.config.get("suppressed_domains", set())
+
+        if domain and domain in allow_domains:
+            return ""
+
+        if domain and domain in suppressed_domains:
+            return "domain_suppressed"
+
+        if self.config.get("suppress_sponsors", True) and link_type == "sponsor":
+            return "sponsor_link"
+
+        if (
+            self.config.get("suppress_social_single_source", True)
+            and link_type == "social_post"
+            and source_count < 2
+        ):
+            return "single_source_social"
+
+        return ""
+
+    def _calculate_common_link_signal(self, appearances: list[dict[str, Any]]) -> int:
+        """
+        Score common links using class diversity, then source diversity, then repetition.
+
+        This gives higher value to links seen across independent source classes
+        (for example newsletter + podcast) than repeated references from one feed.
+        """
+        if not appearances:
+            return 0
+
+        class_weights = {
+            "newsletter": 8,
+            "podcast": 8,
+            "research_hub": 6,
+            "model_hub": 4,
+            "model_library": 4,
+            "other": 5,
+        }
+
+        unique_sources = {a.get("source", "") for a in appearances if a.get("source")}
+        unique_classes = {
+            self._source_class(source)
+            for source in unique_sources
+            if source
+        }
+
+        class_diversity_score = sum(
+            class_weights.get(source_class, class_weights["other"])
+            for source_class in unique_classes
+        )
+        source_count = len(unique_sources)
+        appearance_count = len(appearances)
+        freshness_score, novelty_score = self._calculate_freshness_novelty_scores(
+            appearances
+        )
+
+        total = (
+            class_diversity_score
+            + (source_count * 3)
+            + appearance_count
+            + freshness_score
+            + novelty_score
+        )
+        return max(0, total)
+
+    def _parse_appearance_date(self, date_str: str) -> datetime | None:
+        """Parse appearance date (YYYY-MM-DD or ISO-8601); return None on failure."""
+        if not date_str:
+            return None
+        try:
+            return datetime.fromisoformat(date_str.split("T")[0])
+        except (ValueError, AttributeError, IndexError):
+            return None
+
+    def _calculate_freshness_novelty_scores(
+        self,
+        appearances: list[dict[str, Any]],
+    ) -> tuple[int, int]:
+        """
+        Compute freshness and novelty adjustments.
+
+        Freshness rewards links seen recently and penalizes stale links.
+        Novelty lightly boosts newly-emerged links and downweights evergreen links
+        that recur across a wide timespan.
+        """
+        parsed_dates = [
+            parsed
+            for parsed in (
+                self._parse_appearance_date(a.get("date", ""))
+                for a in appearances
+            )
+            if parsed is not None
+        ]
+        if not parsed_dates:
+            return (0, 0)
+
+        now = datetime.now().date()
+        latest = max(parsed_dates).date()
+        earliest = min(parsed_dates).date()
+        days_since_latest = (now - latest).days
+        span_days = (latest - earliest).days
+
+        # Freshness: strong reward for links still being referenced this week.
+        if days_since_latest <= 1:
+            freshness = 6
+        elif days_since_latest <= 3:
+            freshness = 4
+        elif days_since_latest <= 7:
+            freshness = 2
+        elif days_since_latest <= 14:
+            freshness = 0
+        else:
+            freshness = -4
+
+        # Novelty: reward newly surfaced links, penalize long-lived evergreen links.
+        novelty = 0
+        if len(appearances) <= 2 and days_since_latest <= 7:
+            novelty += 2
+        if span_days > 14:
+            novelty -= 3
+        elif span_days > 7:
+            novelty -= 1
+
+        return (freshness, novelty)
+
+    def _classify_common_link_type(self, item: dict[str, Any]) -> str:
+        """
+        Classify common links using URL/domain/path and simple text heuristics.
+
+        Returns one of:
+        - sponsor
+        - paper
+        - repo
+        - social_post
+        - model_card
+        - news_story
+        """
+        title = (item.get("model_id") or item.get("name") or "").lower()
+        description = (item.get("description") or "").lower()
+        text = f"{title} {description}"
+
+        if "sponsor" in text or "sponsored" in text:
+            return "sponsor"
+
+        url = item.get("url", "")
+        if not url:
+            return "news_story"
+
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower().lstrip("www.")
+        path = parsed.path.lower()
+
+        if domain == "arxiv.org" or path.startswith("/abs/") or path.startswith("/pdf/"):
+            return "paper"
+
+        if domain in {"github.com", "gitlab.com", "bitbucket.org"}:
+            return "repo"
+
+        if domain in {
+            "x.com",
+            "twitter.com",
+            "threadreaderapp.com",
+            "linkedin.com",
+            "reddit.com",
+            "youtube.com",
+            "tiktok.com",
+            "news.ycombinator.com",
+        }:
+            return "social_post"
+
+        if domain == "huggingface.co":
+            parts = [p for p in path.split("/") if p]
+            if len(parts) >= 2 and parts[0] != "papers":
+                return "model_card"
+            if path.startswith("/papers"):
+                return "paper"
+
+        if domain == "ollama.com" and path.startswith("/library/"):
+            return "model_card"
+
+        if any(
+            key in path
+            for key in (
+                "/news",
+                "/blog",
+                "/article",
+                "/articles",
+                "/newsletter",
+                "/explainer-articles",
+                "/story",
+            )
+        ):
+            return "news_story"
+
+        return "news_story"
     
     def run(self, context: dict[str, Any] | None = None) -> AgentResult:
         context = context or {}
@@ -134,7 +377,7 @@ class StoryConsolidatorAgent(BaseAgent):
             normalized = _normalize_url(url)
             
             if not normalized:
-                # Items without URLs are treated individually (will be added to featured)
+                # Items without URLs are treated individually (remain common links)
                 consolidated_id = f"no_url_{len(url_groups)}"
                 if consolidated_id not in url_groups:
                     url_groups[consolidated_id] = []
@@ -166,14 +409,7 @@ class StoryConsolidatorAgent(BaseAgent):
                 key=lambda x: len(x.get("description", "")),
             )
             
-            story = {
-                "consolidated_id": url_key,
-                "primary_item": primary,
-                "appearances": [],
-                "impact_score": len(items_group),
-            }
-            
-            # Build appearances list
+            appearances = []
             for item_info in items_group:
                 item = item_info["item"]
                 appearance = {
@@ -182,7 +418,7 @@ class StoryConsolidatorAgent(BaseAgent):
                     "url": item.get("url", ""),
                     "title": item.get("model_id", item.get("name", "")),
                 }
-                
+
                 # Add source-specific metadata
                 if "episode_title" in item:
                     appearance["episode"] = item["episode_title"]
@@ -190,8 +426,31 @@ class StoryConsolidatorAgent(BaseAgent):
                     appearance["category"] = item["neuron_category"]
                 if "tags" in item and item["tags"]:
                     appearance["tags"] = item["tags"]
-                
-                story["appearances"].append(appearance)
+
+                appearances.append(appearance)
+
+            unique_sources = {
+                appearance.get("source", "")
+                for appearance in appearances
+                if appearance.get("source")
+            }
+            source_count = len(unique_sources)
+
+            story = {
+                "consolidated_id": url_key,
+                "primary_item": primary,
+                "appearances": appearances,
+                "impact_score": len(appearances),
+                "source_count": source_count,
+                "item_type": "common_link",
+                "common_link_type": self._classify_common_link_type(primary),
+                "freshness_score": self._calculate_freshness_novelty_scores(appearances)[0],
+                "novelty_score": self._calculate_freshness_novelty_scores(appearances)[1],
+                "common_link_signal": self._calculate_common_link_signal(appearances),
+            }
+            suppression_reason = self._suppression_reason(story)
+            story["suppressed"] = bool(suppression_reason)
+            story["suppression_reason"] = suppression_reason
             
             consolidated.append(story)
         
@@ -326,6 +585,24 @@ class StoryConsolidatorAgent(BaseAgent):
                     story["appearances"].extend(story_to_merge.get("appearances", []))
                     # Update impact score
                     story["impact_score"] = len(story["appearances"])
+                    story["source_count"] = len(
+                        {
+                            app.get("source", "")
+                            for app in story["appearances"]
+                            if app.get("source")
+                        }
+                    )
+                    story["common_link_signal"] = self._calculate_common_link_signal(
+                        story["appearances"]
+                    )
+                    freshness_score, novelty_score = self._calculate_freshness_novelty_scores(
+                        story["appearances"]
+                    )
+                    story["freshness_score"] = freshness_score
+                    story["novelty_score"] = novelty_score
+                    suppression_reason = self._suppression_reason(story)
+                    story["suppressed"] = bool(suppression_reason)
+                    story["suppression_reason"] = suppression_reason
                     
                     logger.debug(
                         "Consolidated: '%s' now has %d appearances",

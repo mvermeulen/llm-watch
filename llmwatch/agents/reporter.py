@@ -49,51 +49,107 @@ class WeeklyReporterAgent(BaseAgent):
         lines.append("")
 
         # ================================================================== #
-        # Featured Stories Section (from consolidator)
+        # Common Links Section (from consolidator)
         # ================================================================== #
         if consolidated_stories:
-            lines.append("## Featured Stories This Week")
+            visible_stories = [s for s in consolidated_stories if not s.get("suppressed", False)]
+            suppressed_stories = [s for s in consolidated_stories if s.get("suppressed", False)]
+
+            lines.append("## Common Links This Week")
+            lines.append("")
+            lines.append(
+                "Repeated links surfaced across watcher feeds. Ranked by "
+                "cross-source signal to highlight broadly referenced items."
+            )
             lines.append("")
             
-            # Sort by impact score (descending)
+            # Rank by cross-source signal first, then impact score.
             sorted_stories = sorted(
-                consolidated_stories,
-                key=lambda s: s.get("impact_score", 0),
+                visible_stories,
+                key=lambda s: (
+                    s.get("common_link_signal", 0),
+                    s.get("source_count", 0),
+                    s.get("impact_score", 0),
+                ),
                 reverse=True,
             )
-            
-            for idx, story in enumerate(sorted_stories[:10], 1):  # Top 10
-                primary = story.get("primary_item", {})
-                title = primary.get("model_id", primary.get("name", "Featured Story"))
-                url = primary.get("url", "")
-                desc = primary.get("description", "")
-                appearances = story.get("appearances", [])
-                impact = story.get("impact_score", 0)
-                
-                link = f"[{title}]({url})" if url else f"**{title}**"
-                lines.append(f"### {idx}. {link}")
+
+            high_signal_links = [
+                s for s in sorted_stories if s.get("source_count", 0) >= 2
+            ]
+            repeated_references = [
+                s for s in sorted_stories if s.get("source_count", 0) < 2
+            ]
+
+            def render_common_links(stories: list[dict[str, Any]], start_idx: int = 1) -> int:
+                current_idx = start_idx
+                for story in stories:
+                    primary = story.get("primary_item", {})
+                    title = primary.get("model_id", primary.get("name", "Common Link"))
+                    url = primary.get("url", "")
+                    desc = primary.get("description", "")
+                    appearances = story.get("appearances", [])
+                    impact = story.get("impact_score", 0)
+                    source_count = story.get("source_count", 0)
+                    link_type = story.get("common_link_type", "news_story").replace("_", " ")
+
+                    link = f"[{title}]({url})" if url else f"**{title}**"
+                    lines.append(f"### {current_idx}. {link}")
+                    lines.append("")
+                    current_idx += 1
+
+                    lines.append(
+                        f"**Type**: `{link_type}` | **Coverage**: {impact} reference(s) across {source_count} source(s)"
+                    )
+                    lines.append("")
+
+                    if desc:
+                        lines.append(desc)
+                        lines.append("")
+
+                    if appearances and len(appearances) > 1:
+                        lines.append("**Seen in**:")
+                        for app in appearances:
+                            source = app.get("source", "unknown").replace("_", " ").title()
+                            date_str = app.get("date", "")
+                            date_info = f" ({date_str})" if date_str else ""
+                            lines.append(f"- {source}{date_info}")
+                        lines.append("")
+
+                return current_idx
+
+            idx = 1
+            if high_signal_links:
+                lines.append("### High Signal Common Links")
                 lines.append("")
-                
-                if impact > 1:
-                    lines.append(f"**Coverage**: Covered by {impact} sources")
-                    lines.append("")
-                
-                if desc:
-                    lines.append(desc)
-                    lines.append("")
-                
-                if appearances and len(appearances) > 1:
-                    lines.append("**Seen in**:")
-                    for app in appearances:
-                        source = app.get("source", "unknown").replace("_", " ").title()
-                        date_str = app.get("date", "")
-                        app_link = app.get("url", "")
-                        date_info = f" ({date_str})" if date_str else ""
-                        if app_link and app_link != url:  # Don't repeat primary link
-                            lines.append(f"- {source}{date_info}")
-                        else:
-                            lines.append(f"- {source}{date_info}")
-                    lines.append("")
+                idx = render_common_links(high_signal_links[:10], start_idx=idx)
+
+            if repeated_references:
+                lines.append("### Repeated References")
+                lines.append("")
+                render_common_links(repeated_references[:10], start_idx=idx)
+
+            if suppressed_stories:
+                lines.append("### Suppressed Repeated Links")
+                lines.append("")
+                lines.append(
+                    "Filtered by suppression rules (for example sponsor or low-signal social links)."
+                )
+                lines.append("")
+                reason_labels = {
+                    "sponsor_link": "sponsor",
+                    "single_source_social": "single-source social",
+                    "domain_suppressed": "suppressed domain",
+                }
+                for story in suppressed_stories[:10]:
+                    primary = story.get("primary_item", {})
+                    title = primary.get("model_id", primary.get("name", "Suppressed Link"))
+                    url = primary.get("url", "")
+                    reason = story.get("suppression_reason", "suppressed")
+                    reason_text = reason_labels.get(reason, reason.replace("_", " "))
+                    link = f"[{title}]({url})" if url else f"**{title}**"
+                    lines.append(f"- {link} ({reason_text})")
+                lines.append("")
             
             lines.append("---")
             lines.append("")

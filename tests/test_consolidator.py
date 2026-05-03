@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import pytest
 
+import llmwatch.agents.consolidator as consolidator_mod
 from llmwatch.agents.consolidator import _normalize_url, StoryConsolidatorAgent
 from llmwatch.agents.base import AgentResult
 
@@ -109,6 +110,12 @@ class TestStoryConsolidatorAgent:
         
         story = consolidated[0]
         assert story["impact_score"] == 2
+        assert story["source_count"] == 2
+        assert story["item_type"] == "common_link"
+        assert story["common_link_type"] == "news_story"
+        assert story["common_link_signal"] == agent._calculate_common_link_signal(story["appearances"])
+        assert isinstance(story["freshness_score"], int)
+        assert isinstance(story["novelty_score"], int)
         assert len(story["appearances"]) == 2
         sources = {app["source"] for app in story["appearances"]}
         assert sources == {"tldr_ai", "lwiai"}
@@ -145,6 +152,7 @@ class TestStoryConsolidatorAgent:
         # Should produce 2 separate stories
         assert len(consolidated) == 2
         assert all(s["impact_score"] == 1 for s in consolidated)
+        assert all(s["source_count"] == 1 for s in consolidated)
     
     def test_primary_item_selection(self):
         """Primary item should be the one with longest description."""
@@ -271,6 +279,178 @@ class TestStoryConsolidatorAgent:
         assert result.ok()
         assert len(result.data) == 1
         assert result.data[0]["impact_score"] == 2
+
+
+class TestCommonLinkTypeClassification:
+    def test_classifies_sponsor(self):
+        agent = StoryConsolidatorAgent()
+        item = {
+            "model_id": "Awesome Tool (Sponsor)",
+            "url": "https://example.com/promo",
+            "description": "Sponsored placement",
+        }
+        assert agent._classify_common_link_type(item) == "sponsor"
+
+    def test_classifies_paper(self):
+        agent = StoryConsolidatorAgent()
+        item = {
+            "model_id": "Interesting Research",
+            "url": "https://arxiv.org/abs/2604.12345",
+            "description": "Paper link",
+        }
+        assert agent._classify_common_link_type(item) == "paper"
+
+    def test_classifies_repo(self):
+        agent = StoryConsolidatorAgent()
+        item = {
+            "model_id": "Repo",
+            "url": "https://github.com/org/project",
+            "description": "Source code",
+        }
+        assert agent._classify_common_link_type(item) == "repo"
+
+    def test_classifies_social_post(self):
+        agent = StoryConsolidatorAgent()
+        item = {
+            "model_id": "Thread",
+            "url": "https://x.com/someone/status/123",
+            "description": "Social post",
+        }
+        assert agent._classify_common_link_type(item) == "social_post"
+
+    def test_classifies_model_card(self):
+        agent = StoryConsolidatorAgent()
+        item = {
+            "model_id": "Model",
+            "url": "https://huggingface.co/openai/privacy-filter",
+            "description": "HF model",
+        }
+        assert agent._classify_common_link_type(item) == "model_card"
+
+
+class TestSuppressionRules:
+    def test_sponsor_links_are_suppressed_by_default(self):
+        agent = StoryConsolidatorAgent()
+        story = {
+            "primary_item": {
+                "model_id": "Useful Tool (Sponsor)",
+                "url": "https://example.com/sponsor",
+                "description": "Sponsored content",
+            },
+            "common_link_type": "sponsor",
+            "source_count": 1,
+        }
+        assert agent._suppression_reason(story) == "sponsor_link"
+
+    def test_single_source_social_links_are_suppressed(self):
+        agent = StoryConsolidatorAgent()
+        story = {
+            "primary_item": {
+                "model_id": "Thread",
+                "url": "https://x.com/someone/status/1",
+                "description": "Social post",
+            },
+            "common_link_type": "social_post",
+            "source_count": 1,
+        }
+        assert agent._suppression_reason(story) == "single_source_social"
+
+    def test_allowlist_domain_overrides_sponsor_suppression(self):
+        agent = StoryConsolidatorAgent()
+        agent.config["allow_domains"] = {"example.com"}
+        story = {
+            "primary_item": {
+                "model_id": "Tool (Sponsor)",
+                "url": "https://example.com/sponsor",
+                "description": "Sponsored",
+            },
+            "common_link_type": "sponsor",
+            "source_count": 1,
+        }
+        assert agent._suppression_reason(story) == ""
+
+
+class TestCommonLinkSignalWeighting:
+    def test_cross_class_signal_beats_single_feed_repetition(self):
+        agent = StoryConsolidatorAgent()
+
+        repeated_single_feed = [
+            {"source": "neuron_feed"},
+            {"source": "neuron_feed"},
+            {"source": "neuron_feed"},
+        ]
+        cross_class = [
+            {"source": "tldr_ai"},
+            {"source": "lastweekinai_podcast"},
+        ]
+
+        repeated_signal = agent._calculate_common_link_signal(repeated_single_feed)
+        cross_class_signal = agent._calculate_common_link_signal(cross_class)
+
+        assert cross_class_signal > repeated_signal
+
+    def test_same_class_sources_score_lower_than_cross_class_sources(self):
+        agent = StoryConsolidatorAgent()
+
+        same_class_sources = [
+            {"source": "tldr_ai"},
+            {"source": "neuron_feed"},
+        ]
+        cross_class_sources = [
+            {"source": "tldr_ai"},
+            {"source": "lastweekinai_podcast"},
+        ]
+
+        same_class_signal = agent._calculate_common_link_signal(same_class_sources)
+        cross_class_signal = agent._calculate_common_link_signal(cross_class_sources)
+
+        assert cross_class_signal > same_class_signal
+
+    def test_recent_links_score_higher_than_stale_links(self, monkeypatch):
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2026, 5, 3)
+
+        monkeypatch.setattr(consolidator_mod, "datetime", FixedDateTime)
+        agent = StoryConsolidatorAgent()
+
+        recent = [
+            {"source": "tldr_ai", "date": "2026-05-02"},
+            {"source": "lastweekinai_podcast", "date": "2026-05-01"},
+        ]
+        stale = [
+            {"source": "tldr_ai", "date": "2026-03-20"},
+            {"source": "lastweekinai_podcast", "date": "2026-03-18"},
+        ]
+
+        recent_signal = agent._calculate_common_link_signal(recent)
+        stale_signal = agent._calculate_common_link_signal(stale)
+
+        assert recent_signal > stale_signal
+
+    def test_evergreen_span_gets_novelty_penalty(self, monkeypatch):
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2026, 5, 3)
+
+        monkeypatch.setattr(consolidator_mod, "datetime", FixedDateTime)
+        agent = StoryConsolidatorAgent()
+
+        compact_span = [
+            {"source": "tldr_ai", "date": "2026-05-02"},
+            {"source": "lastweekinai_podcast", "date": "2026-05-01"},
+        ]
+        wide_span = [
+            {"source": "tldr_ai", "date": "2026-05-02"},
+            {"source": "lastweekinai_podcast", "date": "2026-04-10"},
+        ]
+
+        compact_novelty = agent._calculate_freshness_novelty_scores(compact_span)[1]
+        wide_novelty = agent._calculate_freshness_novelty_scores(wide_span)[1]
+
+        assert compact_novelty > wide_novelty
 
 
 class TestSimilarityMatching:

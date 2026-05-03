@@ -267,6 +267,107 @@ class TestWeeklyReporterAgent:
         assert "2026-05-01" in report
         assert "explainer-articles" in report
 
+    def test_report_includes_common_links_section_and_ranks_by_signal(self):
+        agent = WeeklyReporterAgent()
+        ctx = {
+            "watcher_results": [],
+            "lookup_results": [],
+            "consolidated_stories": [
+                {
+                    "primary_item": {
+                        "model_id": "Single Source Repeated Link",
+                        "url": "https://example.com/repeated",
+                        "description": "Repeated mentions from one source.",
+                    },
+                    "appearances": [
+                        {"source": "neuron_feed", "date": "2026-05-01", "url": "https://example.com/repeated"},
+                        {"source": "neuron_feed", "date": "2026-05-01", "url": "https://example.com/repeated"},
+                        {"source": "neuron_feed", "date": "2026-05-01", "url": "https://example.com/repeated"},
+                    ],
+                    "impact_score": 3,
+                    "source_count": 1,
+                    "common_link_type": "social_post",
+                    "common_link_signal": 13,
+                },
+                {
+                    "primary_item": {
+                        "model_id": "Cross Source Common Link",
+                        "url": "https://example.com/cross-source",
+                        "description": "Referenced across different feeds.",
+                    },
+                    "appearances": [
+                        {"source": "tldr_ai", "date": "2026-05-01", "url": "https://example.com/cross-source"},
+                        {"source": "lastweekinai_podcast", "date": "2026-05-01", "url": "https://example.com/cross-source"},
+                    ],
+                    "impact_score": 2,
+                    "source_count": 2,
+                    "common_link_type": "news_story",
+                    "common_link_signal": 22,
+                },
+            ],
+        }
+
+        result = agent.run(context=ctx)
+        report = result.data[0]["report"]
+
+        assert "Common Links This Week" in report
+        assert "cross-source signal" in report
+        assert "High Signal Common Links" in report
+        assert "Repeated References" in report
+        assert "Type" in report
+
+        assert report.index("Cross Source Common Link") < report.index("Single Source Repeated Link")
+
+    def test_report_shows_suppressed_links_in_summary_only(self):
+        agent = WeeklyReporterAgent()
+        ctx = {
+            "watcher_results": [],
+            "lookup_results": [],
+            "consolidated_stories": [
+                {
+                    "primary_item": {
+                        "model_id": "Visible Link",
+                        "url": "https://example.com/visible",
+                        "description": "Visible",
+                    },
+                    "appearances": [
+                        {"source": "tldr_ai", "date": "2026-05-01", "url": "https://example.com/visible"},
+                        {"source": "lastweekinai_podcast", "date": "2026-05-01", "url": "https://example.com/visible"},
+                    ],
+                    "impact_score": 2,
+                    "source_count": 2,
+                    "common_link_type": "news_story",
+                    "common_link_signal": 20,
+                    "suppressed": False,
+                    "suppression_reason": "",
+                },
+                {
+                    "primary_item": {
+                        "model_id": "Suppressed Sponsor",
+                        "url": "https://example.com/sponsor",
+                        "description": "Sponsored",
+                    },
+                    "appearances": [
+                        {"source": "tldr_ai", "date": "2026-05-01", "url": "https://example.com/sponsor"},
+                    ],
+                    "impact_score": 1,
+                    "source_count": 1,
+                    "common_link_type": "sponsor",
+                    "common_link_signal": 1,
+                    "suppressed": True,
+                    "suppression_reason": "sponsor_link",
+                },
+            ],
+        }
+
+        result = agent.run(context=ctx)
+        report = result.data[0]["report"]
+
+        assert "Suppressed Repeated Links" in report
+        assert "Suppressed Sponsor" in report
+        assert "(sponsor)" in report
+        assert report.index("Visible Link") < report.index("Suppressed Sponsor")
+
 
 class TestSourceLabel:
     def test_known_agents(self):
