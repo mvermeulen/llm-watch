@@ -111,6 +111,13 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="Look back N days for Last Week in AI podcast summaries (default: 7).",
     )
+    parser.add_argument(
+        "--neuron-lookback-days",
+        type=int,
+        default=7,
+        metavar="N",
+        help="Look back N days for The Neuron feed entries (default: 7).",
+    )
     return parser
 
 
@@ -127,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # ---- Import agents (triggers auto-registration) ---------------------- #
-    from llmwatch.agents.watchers import huggingface, lastweekinai_podcast, ollama, tldr_ai  # noqa: F401
+    from llmwatch.agents.watchers import huggingface, lastweekinai_podcast, neuron_feed, ollama, tldr_ai  # noqa: F401
     from llmwatch.agents.lookup import arxiv  # noqa: F401
     from llmwatch.agents import reporter  # noqa: F401
     from llmwatch.agents.base import registry
@@ -185,7 +192,10 @@ def main(argv: list[str] | None = None) -> int:
     orchestrator = Orchestrator(
         parallel=not args.no_parallel,
         output_dir=output_dir,
-        watcher_options={"lwiai_lookback_days": max(1, args.lwiai_lookback_days)},
+        watcher_options={
+            "lwiai_lookback_days": max(1, args.lwiai_lookback_days),
+            "neuron_lookback_days": max(1, args.neuron_lookback_days),
+        },
         lookup_options={"arxiv_force_fetch": args.arxiv_force_fetch},
     )
 

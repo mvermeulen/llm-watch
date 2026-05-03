@@ -13,6 +13,7 @@ llmwatch/
 │   ├── base.py            # BaseAgent, AgentResult, AgentRegistry (registry singleton)
 │   ├── watchers/
 │   │   ├── huggingface.py # Watches HuggingFace trending models
+│   │   ├── neuron_feed.py # Watches The Neuron Atom feed (feed-first mode)
 │   │   └── ollama.py      # Watches the Ollama model library
 │   ├── lookup/
 │   │   └── arxiv.py       # Looks up arXiv papers for discovered models
@@ -25,7 +26,7 @@ llmwatch/
 
 | Phase      | Agents           | Description                                                  |
 |------------|------------------|--------------------------------------------------------------|
-| `watcher`  | HuggingFace, Ollama | Fetch trending/new models from public sources             |
+| `watcher`  | HuggingFace, Ollama, The Neuron | Fetch trending/new models from public sources |
 | `lookup`   | arXiv            | Search for papers related to discovered models               |
 | `reporter` | WeeklyReporter   | Aggregate everything into a Markdown report                  |
 
@@ -64,6 +65,9 @@ llm-watch --tldr-fetch-only --tldr-date-range "2026-04-25:2026-05-02"
 
 # Set Last Week in AI podcast lookback window (days)
 llm-watch --lwiai-lookback-days 14
+
+# Set The Neuron feed lookback window (days)
+llm-watch --neuron-lookback-days 7
 ```
 
 Or run as a module:
@@ -136,6 +140,16 @@ public feed and applies quality filters to keep high-signal links:
 
 Use `--lwiai-lookback-days` to control how far back podcast episodes are scanned
 on a normal report run.
+
+### The Neuron Feed-First Watcher
+
+The `neuron_feed` watcher reads The Neuron Atom feed directly instead of scraping
+full post pages. This mode is robust when post pages are protected by anti-bot
+challenges.
+
+- Includes: post title, URL, publication date, category term, and summary
+- Categories tracked by default: `newsletter`, `explainer-articles`
+- Lookback control: `--neuron-lookback-days`
 
 ## Adding a new agent
 

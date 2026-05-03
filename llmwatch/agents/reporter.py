@@ -57,6 +57,7 @@ class WeeklyReporterAgent(BaseAgent):
         tldr_other_items: list[dict[str, Any]] = []
         lwiai_summary_items: list[dict[str, Any]] = []
         lwiai_link_items: list[dict[str, Any]] = []
+        neuron_summary_items: list[dict[str, Any]] = []
 
         if not watcher_results:
             lines.append("*No watcher data available this week.*")
@@ -86,6 +87,10 @@ class WeeklyReporterAgent(BaseAgent):
                             lwiai_summary_items.append(item)
                         elif "podcast_link" in tags:
                             lwiai_link_items.append(item)
+                        continue
+
+                    if source == "neuron":
+                        neuron_summary_items.append(item)
                         continue
 
                     # TLDR items can be routed to secondary sections.
@@ -142,6 +147,23 @@ class WeeklyReporterAgent(BaseAgent):
                 context_parts = [part for part in [published, episode_title] if part]
                 context_str = f" ({' | '.join(context_parts)})" if context_parts else ""
                 lines.append(f"- {link}{context_str}")
+            lines.append("")
+
+        if neuron_summary_items:
+            lines.append("## The Neuron Summaries")
+            lines.append("")
+            for item in neuron_summary_items[:30]:
+                title = item.get("model_id", "Untitled")
+                url = item.get("url", "")
+                summary = item.get("description", "")
+                published = item.get("published", "")
+                category = item.get("neuron_category", "")
+
+                link = f"[{title}]({url})" if url else f"**{title}**"
+                meta_parts = [part for part in [published, category] if part]
+                meta_str = f" ({' | '.join(meta_parts)})" if meta_parts else ""
+                summary_str = f" – {summary}" if summary else ""
+                lines.append(f"- {link}{meta_str}{summary_str}")
             lines.append("")
 
         if tldr_analysis_items:
@@ -255,6 +277,7 @@ def _source_label(agent_name: str) -> str:
     labels = {
         "tldr_ai": "TLDR AI – Daily Newsletter",
         "lastweekinai_podcast": "Last Week in AI – Podcast",
+        "neuron_feed": "The Neuron – Feed",
         "huggingface_trending": "HuggingFace – Trending Models",
         "ollama_models": "Ollama – Model Library",
     }

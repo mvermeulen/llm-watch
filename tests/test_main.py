@@ -37,6 +37,16 @@ class TestCliParser:
         args = parser.parse_args([])
         assert args.lwiai_lookback_days == 7
 
+    def test_parses_neuron_lookback_days(self):
+        parser = _build_parser()
+        args = parser.parse_args(["--neuron-lookback-days", "10"])
+        assert args.neuron_lookback_days == 10
+
+    def test_neuron_lookback_days_defaults_to_7(self):
+        parser = _build_parser()
+        args = parser.parse_args([])
+        assert args.neuron_lookback_days == 7
+
 
 class TestDateRangeParser:
     def test_parse_valid_date_range(self):

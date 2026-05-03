@@ -237,6 +237,36 @@ class TestWeeklyReporterAgent:
         assert "Last Week in AI Referenced Links" in report
         assert "Example Source" in report
 
+    def test_report_includes_dedicated_neuron_summaries_section(self):
+        agent = WeeklyReporterAgent()
+        ctx = {
+            "watcher_results": [
+                _make_watcher_result(
+                    "neuron_feed",
+                    [
+                        {
+                            "model_id": "Around the Horn Digest",
+                            "url": "https://www.theneuron.ai/explainer-articles/test/",
+                            "description": "A roundup of the day in AI.",
+                            "tags": ["neuron", "explainer-articles"],
+                            "source": "neuron",
+                            "published": "2026-05-01",
+                            "neuron_category": "explainer-articles",
+                        }
+                    ],
+                )
+            ],
+            "lookup_results": [],
+        }
+
+        result = agent.run(context=ctx)
+        report = result.data[0]["report"]
+
+        assert "The Neuron Summaries" in report
+        assert "Around the Horn Digest" in report
+        assert "2026-05-01" in report
+        assert "explainer-articles" in report
+
 
 class TestSourceLabel:
     def test_known_agents(self):
