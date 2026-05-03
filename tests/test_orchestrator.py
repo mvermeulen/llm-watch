@@ -127,6 +127,29 @@ class TestOrchestrator:
         assert "watcher_results" in received_context
         assert len(received_context["watcher_results"]) == 1
 
+    def test_watcher_receives_watcher_options_context(self, tmp_path):
+        """Watcher agents should receive watcher options as run context."""
+        received_context = {}
+
+        class _CaptureWatcher(BaseAgent):
+            name = "capture_watcher"
+            category = "watcher"
+
+            def run(self, context=None):
+                received_context.update(context or {})
+                return self._result()
+
+        reg = _make_registry(_CaptureWatcher(), _FakeLookup(), _FakeReporter())
+        with patch("llmwatch.orchestrator.registry", reg):
+            orch = Orchestrator(
+                parallel=False,
+                output_dir=None,
+                watcher_options={"lwiai_lookback_days": 14},
+            )
+            orch.run()
+
+        assert received_context.get("lwiai_lookback_days") == 14
+
     def test_reporter_receives_full_context(self, tmp_path):
         """The reporter should receive both watcher and lookup results."""
         received_context = {}

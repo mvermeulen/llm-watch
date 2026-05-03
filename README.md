@@ -61,6 +61,9 @@ llm-watch --tldr-fetch-only
 
 # Fetch TLDR data for a specific date range and merge with cache
 llm-watch --tldr-fetch-only --tldr-date-range "2026-04-25:2026-05-02"
+
+# Set Last Week in AI podcast lookback window (days)
+llm-watch --lwiai-lookback-days 14
 ```
 
 Or run as a module:
@@ -122,6 +125,17 @@ Environment knobs:
 - `LLMWATCH_TLDR_FILTER_MODEL` (default: `llama3.2:3b`)
 - `LLMWATCH_OLLAMA_API_URL` (default: `http://localhost:11434/api/generate`)
 - `LLMWATCH_TLDR_HISTORY_DAYS` (default: `14`)
+
+### Last Week in AI Podcast Link Filtering
+
+The `lastweekinai_podcast` watcher extracts podcast summary links from the
+public feed and applies quality filters to keep high-signal links:
+
+- Keeps: likely article/research links (for example, news posts and arXiv URLs)
+- Drops: low-signal links such as social/profile URLs and generic non-article pages
+
+Use `--lwiai-lookback-days` to control how far back podcast episodes are scanned
+on a normal report run.
 
 ## Adding a new agent
 

@@ -27,6 +27,16 @@ class TestCliParser:
         args = parser.parse_args([])
         assert args.tldr_date_range is None
 
+    def test_parses_lwiai_lookback_days(self):
+        parser = _build_parser()
+        args = parser.parse_args(["--lwiai-lookback-days", "14"])
+        assert args.lwiai_lookback_days == 14
+
+    def test_lwiai_lookback_days_defaults_to_7(self):
+        parser = _build_parser()
+        args = parser.parse_args([])
+        assert args.lwiai_lookback_days == 7
+
 
 class TestDateRangeParser:
     def test_parse_valid_date_range(self):

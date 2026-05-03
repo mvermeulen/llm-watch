@@ -200,6 +200,43 @@ class TestWeeklyReporterAgent:
         assert "TLDR Other AI News" in report
         assert "Anthropic Valuation Update" in report
 
+    def test_report_includes_lastweekinai_sections(self):
+        agent = WeeklyReporterAgent()
+        ctx = {
+            "watcher_results": [
+                _make_watcher_result(
+                    "lastweekinai_podcast",
+                    [
+                        {
+                            "model_id": "LWiAI Podcast #242 - Test",
+                            "url": "https://lastweekin.ai/p/lwiai-podcast-242-test",
+                            "description": "Weekly summary",
+                            "tags": ["podcast_summary"],
+                            "source": "lastweekinai_podcast",
+                            "published": "2026-04-30",
+                        },
+                        {
+                            "model_id": "Example Source",
+                            "url": "https://example.com/story",
+                            "description": "Referenced in podcast",
+                            "tags": ["podcast_link", "example.com"],
+                            "source": "lastweekinai_podcast",
+                            "episode_title": "LWiAI Podcast #242 - Test",
+                            "published": "2026-04-30",
+                        },
+                    ],
+                )
+            ],
+            "lookup_results": [],
+        }
+
+        result = agent.run(context=ctx)
+        report = result.data[0]["report"]
+
+        assert "Last Week in AI Podcast Summaries" in report
+        assert "Last Week in AI Referenced Links" in report
+        assert "Example Source" in report
+
 
 class TestSourceLabel:
     def test_known_agents(self):

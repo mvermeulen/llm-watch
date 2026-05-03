@@ -55,6 +55,8 @@ class WeeklyReporterAgent(BaseAgent):
 
         tldr_analysis_items: list[dict[str, Any]] = []
         tldr_other_items: list[dict[str, Any]] = []
+        lwiai_summary_items: list[dict[str, Any]] = []
+        lwiai_link_items: list[dict[str, Any]] = []
 
         if not watcher_results:
             lines.append("*No watcher data available this week.*")
@@ -78,6 +80,13 @@ class WeeklyReporterAgent(BaseAgent):
                     desc = item.get("description", "")
                     tags = item.get("tags", [])
                     source = item.get("source", "")
+
+                    if source == "lastweekinai_podcast":
+                        if "podcast_summary" in tags:
+                            lwiai_summary_items.append(item)
+                        elif "podcast_link" in tags:
+                            lwiai_link_items.append(item)
+                        continue
 
                     # TLDR items can be routed to secondary sections.
                     if source == "tldr_ai":
@@ -106,6 +115,34 @@ class WeeklyReporterAgent(BaseAgent):
                         lines.append(f"- {link}{tag_str}{desc_str}")
                     shown += 1
                 lines.append("")
+
+        if lwiai_summary_items:
+            lines.append("## Last Week in AI Podcast Summaries")
+            lines.append("")
+            for item in lwiai_summary_items[:5]:
+                title = item.get("model_id", "Untitled episode")
+                url = item.get("url", "")
+                published = item.get("published", "")
+                desc = item.get("description", "")
+                link = f"[{title}]({url})" if url else f"**{title}**"
+                date_str = f" ({published})" if published else ""
+                desc_str = f" – {desc}" if desc else ""
+                lines.append(f"- {link}{date_str}{desc_str}")
+            lines.append("")
+
+        if lwiai_link_items:
+            lines.append("## Last Week in AI Referenced Links")
+            lines.append("")
+            for item in lwiai_link_items[:30]:
+                title = item.get("model_id", "Referenced link")
+                url = item.get("url", "")
+                episode_title = item.get("episode_title", "")
+                published = item.get("published", "")
+                link = f"[{title}]({url})" if url else f"**{title}**"
+                context_parts = [part for part in [published, episode_title] if part]
+                context_str = f" ({' | '.join(context_parts)})" if context_parts else ""
+                lines.append(f"- {link}{context_str}")
+            lines.append("")
 
         if tldr_analysis_items:
             lines.append("## TLDR Model Analysis")
@@ -217,6 +254,7 @@ class WeeklyReporterAgent(BaseAgent):
 def _source_label(agent_name: str) -> str:
     labels = {
         "tldr_ai": "TLDR AI – Daily Newsletter",
+        "lastweekinai_podcast": "Last Week in AI – Podcast",
         "huggingface_trending": "HuggingFace – Trending Models",
         "ollama_models": "Ollama – Model Library",
     }

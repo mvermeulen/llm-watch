@@ -45,10 +45,12 @@ class Orchestrator:
         self,
         parallel: bool = True,
         output_dir: str | None = ".",
+        watcher_options: dict[str, Any] | None = None,
         lookup_options: dict[str, Any] | None = None,
     ) -> None:
         self.parallel = parallel
         self.output_dir = output_dir
+        self.watcher_options = watcher_options or {}
         self.lookup_options = lookup_options or {}
 
     # ------------------------------------------------------------------
@@ -70,7 +72,7 @@ class Orchestrator:
         logger.info("Orchestrator: starting run with %d agent(s)", len(registry))
 
         # ---- Phase 1: watchers ------------------------------------------ #
-        watcher_results = self._run_phase("watcher")
+        watcher_results = self._run_phase("watcher", context=self.watcher_options)
 
         # ---- Phase 2: lookup -------------------------------------------- #
         lookup_context: dict[str, Any] = {
