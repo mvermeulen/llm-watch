@@ -5,6 +5,19 @@
 A modular, agent-based system that monitors the world of large language models
 and produces a **weekly investigation report** in Markdown.
 
+## Docs Index
+
+### Active Docs
+
+- [README.md](README.md) - Project overview, usage, and architecture
+- [docs/CONSOLIDATION_QUICK_REFERENCE.md](docs/CONSOLIDATION_QUICK_REFERENCE.md) - Canonical current-state consolidation behavior and roadmap
+- [docs/llm_watch_report_2026-05-02.md](docs/llm_watch_report_2026-05-02.md) - Latest generated report snapshot (example output)
+
+### Archived Docs (Historical)
+
+- [docs/CONSOLIDATION_AGENT_INVESTIGATION.md](docs/CONSOLIDATION_AGENT_INVESTIGATION.md) - Design investigation and decision record before implementation
+- [docs/PHASE_1_MVP_IMPLEMENTATION.md](docs/PHASE_1_MVP_IMPLEMENTATION.md) - Phase 1 implementation runbook used during initial rollout
+
 ## Architecture
 
 ```
@@ -29,7 +42,7 @@ llmwatch/
 |------------|------------------|--------------------------------------------------------------|
 | `watcher`  | HuggingFace Models, HuggingFace Papers, Ollama, The Neuron | Fetch trending/new models/papers from public sources |
 | `lookup`   | arXiv            | Search for papers related to discovered models               |
-| `reporter` | WeeklyReporter   | Aggregate everything into a Markdown report                  |
+| `reporter` | StoryConsolidator, WeeklyReporter | Sequential reporter pipeline: consolidate stories, then render report |
 
 ## Installation
 
@@ -186,12 +199,14 @@ pytest
 ## Report format
 
 Each run produces a Markdown file named `llm_watch_report_YYYY-MM-DD.md` with
-four sections:
+five sections:
 
-1. **Trending & New Models** – models discovered by watcher agents, grouped by
+1. **Featured Stories This Week** – consolidated cross-source stories ranked by
+   impact score.
+2. **Trending & New Models** – models discovered by watcher agents, grouped by
    source.
-2. **Related Research Papers (arXiv)** – papers found by the lookup agent,
+3. **Related Research Papers (arXiv)** – papers found by the lookup agent,
    grouped by search term.
-3. **Warnings** – any errors that occurred during the run.
-4. **New Sources Discovered** – external URLs found in model descriptions or
+4. **Warnings** – any errors that occurred during the run.
+5. **New Sources Discovered** – external URLs found in model descriptions or
    paper abstracts that are not yet tracked, highlighted for future monitoring.

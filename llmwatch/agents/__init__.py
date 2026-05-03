@@ -10,3 +10,6 @@ Agents are divided into three categories:
 from llmwatch.agents.base import AgentResult, BaseAgent, registry
 
 __all__ = ["BaseAgent", "AgentResult", "registry"]
+
+# Ensure all agents are registered
+from llmwatch.agents import consolidator  # noqa: F401

@@ -82,11 +82,13 @@ class Orchestrator:
         lookup_results = self._run_phase("lookup", context=lookup_context)
 
         # ---- Phase 3: reporter ------------------------------------------ #
+        # Run reporter agents sequentially to allow consolidator to enrich context
         reporter_context: dict[str, Any] = {
             "watcher_results": watcher_results,
             "lookup_results": lookup_results,
+            "consolidated_stories": None,  # Will be populated by consolidator
         }
-        reporter_results = self._run_phase("reporter", context=reporter_context)
+        reporter_results = self._run_reporter_phase(reporter_context)
 
         # ---- Persist report --------------------------------------------- #
         report_path: str | None = None
@@ -173,6 +175,53 @@ class Orchestrator:
                             errors=[str(exc)],
                         )
                     )
+        return results
+
+    def _run_reporter_phase(self, context: dict[str, Any]) -> list[AgentResult]:
+        """
+        Run reporter agents sequentially, allowing consolidator to enrich context.
+        
+        The consolidator (story_consolidator agent) runs first and populates
+        consolidated_stories in the context for subsequent reporter agents to use.
+        """
+        agents = registry.agents(category="reporter")
+        if not agents:
+            logger.debug("Orchestrator: no reporter agents found")
+            return []
+
+        logger.info(
+            "Orchestrator: running %d reporter agent(s): %s",
+            len(agents),
+            [a.name for a in agents],
+        )
+
+        results = []
+        for agent in agents:
+            try:
+                logger.debug("Running reporter agent: %s", agent.name)
+                result = agent.run(context=context)
+                results.append(result)
+                
+                # If this is the consolidator, add its output to context for next agents
+                if agent.name == "story_consolidator":
+                    context["consolidated_stories"] = result.data
+                    logger.info(
+                        "Consolidator produced %d consolidated stories",
+                        len(result.data) if result.data else 0,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "Reporter agent '%s' raised an unexpected error: %s",
+                    agent.name,
+                    exc,
+                )
+                results.append(
+                    AgentResult(
+                        agent_name=agent.name,
+                        category="reporter",
+                        errors=[str(exc)],
+                    )
+                )
         return results
 
     def _write_report(self, reporter_results: list[AgentResult]) -> str | None:

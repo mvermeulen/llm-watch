@@ -1,0 +1,227 @@
+# Quick Reference: Featured Stories Consolidation (Active)
+
+Status: Active and current as of 2026-05-02
+
+This is the canonical consolidation reference. Historical planning and rollout docs are archived in [CONSOLIDATION_AGENT_INVESTIGATION.md](CONSOLIDATION_AGENT_INVESTIGATION.md) and [PHASE_1_MVP_IMPLEMENTATION.md](PHASE_1_MVP_IMPLEMENTATION.md).
+
+## Problem Statement
+News items appear **2-3 times** across different report sections:
+- TLDR AI → "Trending & New Models"
+- Last Week in AI → "Referenced Links"  
+- The Neuron → "Summaries"
+- ArXiv → "Research Papers"
+
+## Solution: Consolidator Agent
+A **reporter-phase agent** that:
+1. Detects duplicate stories across sources
+2. Creates "Featured Stories" section with cross-references
+3. Enriches metadata (impact score, appearance count)
+
+## Current Implementation
+
+### Implemented Files
+
+| File | Status |
+|------|--------|
+| `llmwatch/agents/consolidator.py` | Implemented |
+| `llmwatch/agents/reporter.py` | Updated for Featured Stories rendering |
+| `llmwatch/orchestrator.py` | Updated for sequential reporter execution |
+| `tests/test_consolidator.py` | Implemented (Phase 1 + Phase 2 coverage) |
+
+### Architecture
+
+```
+Watcher Phase (collect data)
+    ↓
+Lookup Phase (find papers)
+    ↓
+Reporter Phase (sequential)
+    ├─→ StoryConsolidatorAgent
+    │       • Input: watcher_results + lookup_results
+    │       • Output: consolidated_stories with metadata
+    │       • Algorithm: URL normalization + title similarity
+    ├─→ WeeklyReporterAgent (modified)
+    │       • Input: + consolidated_stories
+    │       • Output: markdown with "Featured Stories" section
+    └─→ Other reporters
+```
+
+## Deduplication Algorithm (Current)
+
+**Primary match**: Normalize URLs, exact match
+```python
+url1 = "https://example.com/article/grok" 
+url2 = "https://example.com/article/grok?utm_source=tldr"
+→ Both normalized to "https://example.com/article/grok" ✓ MATCH
+```
+
+**Secondary match**: Title similarity (>85%) + same week
+```python
+title1 = "xAI launches Grok 4.3"
+title2 = "Grok 4.3 improves cost-efficiency"
+→ Similarity: 0.86 ✓ MATCH (if within 7 days)
+```
+
+Tertiary matching is not implemented yet. Current behavior is URL + title similarity within temporal window.
+
+## Output Example
+
+### Featured Stories Section (New)
+```markdown
+## Featured Stories This Week
+
+### 1. xAI Launches Grok 4.3 – Improved Cost-Efficiency 🔥
+**Impact**: Covered by 3 sources | **First reported**: May 2, 2026
+
+Grok 4.3 scores higher on Intelligence Index while costing less...
+
+**Coverage**:
+- TLDR AI Daily Newsletter (May 2 | Headlines & Launches)
+- Last Week in AI Podcast #242 (Apr 30 | Referenced)
+- The Neuron Newsletter (May 1)
+
+---
+```
+
+## Phase Progress
+
+### Phase 1: MVP (URL-based deduplication)
+Status: Completed | Coverage: ~70% of duplicates
+
+```python
+def consolidate_by_url(items):
+    """Simple URL-based deduplication."""
+    seen = {}
+    for item in items:
+        url = normalize_url(item.get("url", ""))
+        if not url or url not in seen:
+            seen[url] = item
+            yield item
+```
+
+### Phase 2: Enhanced (Title similarity)
+Status: Completed | Coverage: ~90% of duplicates
+
+```python
+def consolidate_with_similarity(items):
+    """URL match + title similarity (0.85 threshold)."""
+    # Requires: difflib.SequenceMatcher
+    # Adds: temporal proximity check (same week)
+```
+
+### Phase 3: Semantic (Ollama enhancement)
+Status: Planned | Coverage target: ~95%+
+
+```python
+class StoryConsolidatorAgent(BaseAgent):
+    """Current implementation: URL + title similarity consolidation."""
+    # Implemented:
+    # - URL normalization and grouping
+    # - SequenceMatcher title similarity (threshold configurable)
+    # - Temporal window filtering
+    # - Cross-source appearances metadata
+    # - Impact scoring by appearance count
+```
+
+## Key Decision Points
+
+| Decision | Current State | Rationale |
+|----------|---------------|----------|
+| **Create new agent or in-reporter?** | Implemented as new agent | Cleaner separation of concerns; testable |
+| **Similarity threshold** | 0.85 default, configurable | Reduces false positives; tunable via env var |
+| **Temporal window** | 7 days default, configurable | Stories considered same when temporally close |
+| **Impact metric** | Implemented (appearance count) | Simple and interpretable |
+| **Future: Local AI model** | Planned | Ollama-style semantic deduplication |
+
+### Configuration
+```python
+# Environment variables for consolidator
+LLMWATCH_CONSOLIDATOR_SIMILARITY_THRESHOLD=0.85  # Configurable 0.0-1.0
+LLMWATCH_CONSOLIDATOR_TEMPORAL_WINDOW_DAYS=7     # Temporal proximity window
+LLMWATCH_CONSOLIDATOR_OLLAMA_ENABLED=false       # Future: Enable local ML dedup
+LLMWATCH_CONSOLIDATOR_OLLAMA_MODEL=llama3.2:3b   # Future: Local model for complex cases
+```
+
+## Testing Strategy
+
+```python
+# Unit tests (implemented):
+test_normalize_url()           # URL normalization
+test_title_similarity()        # Similarity matching
+test_consolidate_basic()       # Simple dedup
+test_consolidate_complex()     # Multi-source same story
+test_featured_stories_render() # Markdown generation
+
+# Integration tests (implemented):
+test_end_to_end_with_sample_report()  # Full flow
+test_consolidator_ordering()          # Orchestrator sequencing
+```
+
+## Known Challenges & Solutions
+
+| Challenge | Solution |
+|-----------|----------|
+| **False positives** (different stories match) | Increase similarity threshold to 0.90 or require URL match |
+| **Performance** (O(n²) matching) | Pre-filter by date before matching; use bloom filters for URLs |
+| **Missing URLs** | Use description hash as fallback matching |
+| **Different titles, same story** | Use description embedding similarity (requires ML model) |
+| **Changing requirement** | Consolidator is isolated; easy to modify/extend |
+
+## Observed Metrics
+
+Recent run metrics:
+- Phase 1 baseline: 189 items -> 187 unique stories
+- Phase 2 current: 189 items -> 181 unique stories
+- Additional Phase 2 gain: 6 more duplicates consolidated
+- Featured Stories section rendered in report output
+
+## Roadmap
+
+### Phase 1: MVP – URL-Based Deduplication
+Status: Completed
+
+**Deliverables**:
+- ✓ Create `agents/consolidator.py` with `StoryConsolidatorAgent`
+- ✓ URL normalization & exact matching
+- ✓ Configuration support (similarity threshold, temporal window)
+- ✓ Basic "Featured Stories" section rendering
+- ✓ Unit tests for URL normalization
+- ✓ Integration test with sample report
+
+**Definition of Done**:
+- Duplicates by URL are eliminated
+- "Featured Stories" section appears in report
+- No regression in existing report sections
+- Configuration can be set via environment variables
+- Tests passing
+
+### Phase 2: Enhanced – Title Similarity
+Status: Completed
+
+**Additions**:
+- Title similarity matching (configurable threshold: 0.85, default)
+- Temporal window filtering (7 days, configurable)
+- `SequenceMatcher`-based fuzzy matching
+- Enhanced deduplication tests
+
+### Phase 3: Future – Local AI Model Support
+Status: Backlog
+
+**Approach** (similar to TLDR AI's Ollama filtering):
+- Integrate Ollama for semantic understanding when enabled
+- Use local model for ambiguous matches
+- Example prompt:
+  ```
+  "Are these two stories about the same event?
+   Story 1: {title1} - {desc1}
+   Story 2: {title2} - {desc2}
+   Return JSON: {same: boolean, confidence: 0.0-1.0}"
+  ```
+- Environment variables: `LLMWATCH_CONSOLIDATOR_OLLAMA_ENABLED`, `LLMWATCH_CONSOLIDATOR_OLLAMA_MODEL`
+- Graceful fallback if Ollama unavailable (use Phase 2 matching)
+
+## Immediate Next Steps
+
+1. Implement Phase 3 semantic deduplication with optional Ollama integration
+2. Add fallback and timeout behavior tests for Ollama unavailable scenarios
+3. Optionally exclude sponsor items from Featured Stories ranking

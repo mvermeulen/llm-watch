@@ -39,6 +39,7 @@ class WeeklyReporterAgent(BaseAgent):
         context = context or {}
         watcher_results: list[AgentResult] = context.get("watcher_results", [])
         lookup_results: list[AgentResult] = context.get("lookup_results", [])
+        consolidated_stories: list[dict[str, Any]] = context.get("consolidated_stories", [])
 
         today = date.today().isoformat()
         lines: list[str] = []
@@ -46,6 +47,56 @@ class WeeklyReporterAgent(BaseAgent):
         lines.append(f"# LLM Watch – Weekly Investigation Report")
         lines.append(f"*Generated: {today}*")
         lines.append("")
+
+        # ================================================================== #
+        # Featured Stories Section (from consolidator)
+        # ================================================================== #
+        if consolidated_stories:
+            lines.append("## Featured Stories This Week")
+            lines.append("")
+            
+            # Sort by impact score (descending)
+            sorted_stories = sorted(
+                consolidated_stories,
+                key=lambda s: s.get("impact_score", 0),
+                reverse=True,
+            )
+            
+            for idx, story in enumerate(sorted_stories[:10], 1):  # Top 10
+                primary = story.get("primary_item", {})
+                title = primary.get("model_id", primary.get("name", "Featured Story"))
+                url = primary.get("url", "")
+                desc = primary.get("description", "")
+                appearances = story.get("appearances", [])
+                impact = story.get("impact_score", 0)
+                
+                link = f"[{title}]({url})" if url else f"**{title}**"
+                lines.append(f"### {idx}. {link}")
+                lines.append("")
+                
+                if impact > 1:
+                    lines.append(f"**Coverage**: Covered by {impact} sources")
+                    lines.append("")
+                
+                if desc:
+                    lines.append(desc)
+                    lines.append("")
+                
+                if appearances and len(appearances) > 1:
+                    lines.append("**Seen in**:")
+                    for app in appearances:
+                        source = app.get("source", "unknown").replace("_", " ").title()
+                        date_str = app.get("date", "")
+                        app_link = app.get("url", "")
+                        date_info = f" ({date_str})" if date_str else ""
+                        if app_link and app_link != url:  # Don't repeat primary link
+                            lines.append(f"- {source}{date_info}")
+                        else:
+                            lines.append(f"- {source}{date_info}")
+                    lines.append("")
+            
+            lines.append("---")
+            lines.append("")
 
         # ------------------------------------------------------------------ #
         # Section 1: Trending / new models
