@@ -8,6 +8,7 @@ as "new sources to explore" in the report.
 
 from __future__ import annotations
 
+import html as html_lib
 import logging
 import re
 from datetime import date
@@ -18,6 +19,8 @@ from llmwatch.agents.base import AgentResult, BaseAgent, registry
 logger = logging.getLogger(__name__)
 
 _URL_RE = re.compile(r"https?://[^\s\"'<>)\]]+")
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
 
 
 class WeeklyReporterAgent(BaseAgent):
@@ -179,10 +182,8 @@ class WeeklyReporterAgent(BaseAgent):
             for w_result in sorted_results:
                 if not w_result.data:
                     continue
-                source_label = _source_label(w_result.agent_name)
-                lines.append(f"### {source_label}")
-                lines.append("")
                 shown = 0
+                rendered_items: list[str] = []
                 for item in w_result.data:
                     model_id = item.get("model_id", item.get("name", "Unknown"))
                     url = item.get("url", "")
@@ -219,19 +220,26 @@ class WeeklyReporterAgent(BaseAgent):
                     if shown >= 15:
                         continue
 
+                    desc = _sanitize_report_description(desc, source)
                     link = f"[{model_id}]({url})" if url else f"**{model_id}**"
                     desc_str = f" – {desc}" if desc else ""
                     
                     # For TLDR items, put the single category tag at the end
                     if source == "tldr_ai" and tags:
                         category = tags[0]  # TLDR items have exactly one tag
-                        lines.append(f"- {link}{desc_str} `{category}`")
+                        rendered_items.append(f"- {link}{desc_str} `{category}`")
                     else:
                         # For other sources, keep tags inline
                         tag_str = f" `{'` `'.join(str(t) for t in tags[:4])}`" if tags else ""
-                        lines.append(f"- {link}{tag_str}{desc_str}")
+                        rendered_items.append(f"- {link}{tag_str}{desc_str}")
                     shown += 1
-                lines.append("")
+
+                if rendered_items:
+                    source_label = _source_label(w_result.agent_name)
+                    lines.append(f"### {source_label}")
+                    lines.append("")
+                    lines.extend(rendered_items)
+                    lines.append("")
 
         if lwiai_summary_items:
             lines.append("## Last Week in AI Podcast Summaries")
@@ -412,11 +420,35 @@ def _source_label(agent_name: str) -> str:
         "tldr_ai": "TLDR AI – Daily Newsletter",
         "lastweekinai_podcast": "Last Week in AI – Podcast",
         "neuron_feed": "The Neuron – Feed",
+        "openai_news_feed": "OpenAI – News Feed",
+        "google_ai_blog_feed": "Google – AI Blog Feed",
+        "deepmind_blog_feed": "Google DeepMind – Blog Feed",
+        "microsoft_ai_blog_feed": "Microsoft – AI Blog Feed",
+        "aws_ml_blog_feed": "AWS – Machine Learning Blog Feed",
+        "qwen_blog_feed": "Qwen – Blog Feed",
+        "meta_ai_blog_scrape": "Meta – AI Blog (Scrape)",
+        "anthropic_news_scrape": "Anthropic – News (Scrape)",
+        "mistral_news_scrape": "Mistral – News (Scrape)",
+        "xai_news_scrape": "xAI – News (Scrape)",
         "huggingface_trending": "HuggingFace – Trending Models",
         "huggingface_trending_papers": "HuggingFace – Trending Papers",
         "ollama_models": "Ollama – Model Library",
     }
     return labels.get(agent_name, agent_name.replace("_", " ").title())
+
+
+def _sanitize_report_description(desc: str, source: str) -> str:
+    if not desc:
+        return ""
+
+    cleaned = html_lib.unescape(str(desc))
+    if source in {"meta_ai_blog", "anthropic_news", "mistral_news", "xai_news"}:
+        # Scrape descriptions may include trailing raw HTML fragments.
+        cleaned = cleaned.split("<", 1)[0]
+
+    cleaned = _HTML_TAG_RE.sub("", cleaned)
+    cleaned = _WS_RE.sub(" ", cleaned).strip()
+    return cleaned
 
 
 def _collect_new_sources(results: list[AgentResult]) -> list[str]:

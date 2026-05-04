@@ -368,6 +368,32 @@ class TestWeeklyReporterAgent:
         assert "(sponsor)" in report
         assert report.index("Visible Link") < report.index("Suppressed Sponsor")
 
+    def test_scrape_description_strips_trailing_html_fragments(self):
+        agent = WeeklyReporterAgent()
+        ctx = {
+            "watcher_results": [
+                _make_watcher_result(
+                    "anthropic_news_scrape",
+                    [
+                        {
+                            "model_id": "Claude for Creative Work",
+                            "url": "https://www.anthropic.com/news/claude-for-creative-work",
+                            "description": "Apr 28, 2026<span class=\"PublicationList\">",
+                            "tags": ["anthropic_news", "scrape"],
+                            "source": "anthropic_news",
+                        }
+                    ],
+                )
+            ],
+            "lookup_results": [],
+        }
+
+        result = agent.run(context=ctx)
+        report = result.data[0]["report"]
+
+        assert "Apr 28, 2026" in report
+        assert "<span" not in report
+
 
 class TestSourceLabel:
     def test_known_agents(self):

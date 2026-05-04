@@ -28,7 +28,9 @@ llmwatch/
 │   │   ├── huggingface.py        # Watches HuggingFace trending models
 │   │   ├── huggingface_papers.py # Watches HuggingFace trending papers
 │   │   ├── neuron_feed.py        # Watches The Neuron Atom feed (feed-first mode)
-│   │   └── ollama.py             # Watches the Ollama model library
+│   │   ├── ollama.py             # Watches the Ollama model library
+│   │   ├── vendor_blogs.py       # Watches vendor AI/news blogs via RSS/Atom feeds
+│   │   └── vendor_scrape.py      # Watches vendor pages via HTML scraping (Phase 2)
 │   ├── lookup/
 │   │   └── arxiv.py       # Looks up arXiv papers for discovered models
 │   └── reporter.py        # Aggregates findings into a weekly Markdown report
@@ -40,7 +42,7 @@ llmwatch/
 
 | Phase      | Agents           | Description                                                  |
 |------------|------------------|--------------------------------------------------------------|
-| `watcher`  | HuggingFace Models, HuggingFace Papers, Ollama, The Neuron | Fetch trending/new models/papers from public sources |
+| `watcher`  | HuggingFace Models, HuggingFace Papers, Ollama, The Neuron, Vendor Blog Feeds, Vendor Scrape Sources | Fetch trending/new models/papers from public sources |
 | `lookup`   | arXiv            | Search for papers related to discovered models               |
 | `reporter` | StoryConsolidator, WeeklyReporter | Sequential reporter pipeline: consolidate stories, then render report |
 
@@ -74,6 +76,15 @@ llm-watch --arxiv-force-fetch
 # Fetch and cache TLDR updates only (no report generation)
 llm-watch --tldr-fetch-only
 
+# Fetch only vendor blog feeds (no report generation)
+llm-watch --vendor-blogs-fetch-only
+
+# Fetch only vendor scrape sources (no report generation)
+llm-watch --vendor-scrape-fetch-only
+
+# Fetch scrape sources but do not fail process on per-source scrape errors
+llm-watch --vendor-scrape-fetch-only --vendor-scrape-soft-fail
+
 # Fetch TLDR data for a specific date range and merge with cache
 llm-watch --tldr-fetch-only --tldr-date-range "2026-04-25:2026-05-02"
 
@@ -82,6 +93,24 @@ llm-watch --lwiai-lookback-days 14
 
 # Set The Neuron feed lookback window (days)
 llm-watch --neuron-lookback-days 7
+
+# Set vendor blog feed lookback window (days)
+llm-watch --vendor-blog-lookback-days 14
+
+# Set a global maximum items per vendor feed
+llm-watch --vendor-blog-max-items 15
+
+# Set per-feed limits (agent_name=max_items)
+llm-watch --vendor-blog-feed-limits "openai_news_feed=10,aws_ml_blog_feed=5"
+
+# Use short aliases for common feeds
+llm-watch --vendor-blog-feed-limits "openai=10,aws=5,google=4"
+
+# Set vendor scrape lookback and limits
+llm-watch --vendor-scrape-lookback-days 14 --vendor-scrape-max-items 10
+
+# Per-source scrape limits with aliases
+llm-watch --vendor-scrape-source-limits "meta=8,anthropic=6,mistral=6,xai=6"
 ```
 
 Or run as a module:
@@ -164,6 +193,75 @@ challenges.
 - Includes: post title, URL, publication date, category term, and summary
 - Categories tracked by default: `newsletter`, `explainer-articles`
 - Lookback control: `--neuron-lookback-days`
+
+### Vendor Blog Feed Watchers (Phase 1)
+
+The `vendor_blogs` watcher module adds feed-first watchers for these sources:
+
+- OpenAI News
+- Google AI Blog
+- Google DeepMind Blog
+- Microsoft AI Blog
+- AWS Machine Learning Blog
+- Qwen Blog (legacy Hugo feed)
+
+These are intentionally RSS/Atom-first to keep maintenance low and avoid brittle
+HTML scraping.
+
+- Lookback control on normal runs: `--vendor-blog-lookback-days`
+- Global per-feed cap: `--vendor-blog-max-items`
+- Optional per-feed overrides: `--vendor-blog-feed-limits "agent_name=n,..."`
+- Supported short aliases: `openai`, `google`, `deepmind`, `microsoft`, `aws`, `qwen`
+- Feed-only run mode: `--vendor-blogs-fetch-only`
+
+### Vendor Scrape Watchers (Phase 2)
+
+The `vendor_scrape` watcher module adds lightweight listing-page scraping for:
+
+- Meta AI Blog
+- Anthropic News
+- Mistral News
+- xAI News
+
+These are used when stable RSS/Atom feeds are unavailable.
+
+- Lookback control on normal runs: `--vendor-scrape-lookback-days`
+- Global per-source cap: `--vendor-scrape-max-items`
+- Optional per-source overrides: `--vendor-scrape-source-limits "agent_name=n,..."`
+- Supported short aliases: `meta`, `anthropic`, `mistral`, `xai`
+- Scrape-only run mode: `--vendor-scrape-fetch-only`
+- Optional scrape-only soft fail: `--vendor-scrape-soft-fail`
+
+Environment knobs:
+
+- `LLMWATCH_VENDOR_SCRAPE_HEALTH_WARNING_STREAK` (default: `2`)
+   - Emit scrape health warnings only after N consecutive zero-item runs.
+
+### Source Operations
+
+Use these commands as a quick operational checklist:
+
+```bash
+# Feed-only health check
+llm-watch --vendor-blogs-fetch-only --vendor-blog-lookback-days 14
+
+# Scrape-only health check
+llm-watch --vendor-scrape-fetch-only --vendor-scrape-lookback-days 14
+
+# Full report run (end-to-end)
+llm-watch --no-parallel
+```
+
+### Scrape Troubleshooting
+
+If scrape sources degrade, use this table to triage quickly:
+
+| Symptom | Likely Cause | Suggested Action |
+|---|---|---|
+| `0 items` with no request errors (single run) | No recent posts or transient layout mismatch | Re-run with larger lookback window |
+| `0 items` warning after streak threshold | Persistent layout drift or anti-bot challenge | Inspect listing HTML and update source regex rules |
+| Request failures/timeouts | Network instability or temporary endpoint issues | Retry run; lower concurrency via `--no-parallel` |
+| Scraped links look low-signal/navigation-only | Generic links matching source pattern | Tighten per-source filtering rules in `vendor_scrape.py` |
 
 ### Common Links Ranking and Suppression
 
