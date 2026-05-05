@@ -30,6 +30,7 @@ import argparse
 import logging
 import sys
 from datetime import date, datetime, timedelta
+from typing import Any
 
 
 def _parse_date_range(date_range_str: str) -> tuple[date, date] | None:
@@ -245,6 +246,33 @@ def _build_parser() -> argparse.ArgumentParser:
             "meta=10,anthropic=8 or meta_ai_blog_scrape=10"
         ),
     )
+    parser.add_argument(
+        "--edit",
+        action="store_true",
+        help=(
+            "Run the Ollama editor agent after the reporter to post-process the "
+            "Markdown report (adds summary, fixes truncations, annotates stale items). "
+            "Requires a running Ollama server. Also enabled by LLMWATCH_EDITOR_ENABLED=true."
+        ),
+    )
+    parser.add_argument(
+        "--editor-model",
+        default=None,
+        metavar="MODEL",
+        help=(
+            "Ollama model to use for the editor pass "
+            "(default: LLMWATCH_EDITOR_MODEL env var, fallback: laguna-xs.2)."
+        ),
+    )
+    parser.add_argument(
+        "--editor-skip-tasks",
+        default="",
+        metavar="TASKS",
+        help=(
+            "Comma-separated list of editor tasks to skip. "
+            "Choices: summary, truncations, stale, themes, model_digest."
+        ),
+    )
     return parser
 
 
@@ -263,7 +291,7 @@ def main(argv: list[str] | None = None) -> int:
     # ---- Import agents (triggers auto-registration) ---------------------- #
     from llmwatch.agents.watchers import huggingface, huggingface_papers, lastweekinai_podcast, neuron_feed, ollama, tldr_ai, vendor_blogs, vendor_scrape  # noqa: F401
     from llmwatch.agents.lookup import arxiv  # noqa: F401
-    from llmwatch.agents import reporter  # noqa: F401
+    from llmwatch.agents import reporter, editor  # noqa: F401
     from llmwatch.agents.base import registry
     from llmwatch.orchestrator import Orchestrator
 
@@ -426,6 +454,20 @@ def main(argv: list[str] | None = None) -> int:
 
     output_dir = None if args.dry_run else args.output_dir
 
+    import os as _os
+
+    editor_enabled = args.edit or _os.getenv("LLMWATCH_EDITOR_ENABLED", "false").lower() == "true"
+    editor_skip_tasks = [
+        t.strip() for t in args.editor_skip_tasks.split(",") if t.strip()
+    ]
+    editor_options: dict[str, Any] = {"enabled": editor_enabled}
+    if editor_skip_tasks:
+        editor_options["skip_tasks"] = editor_skip_tasks
+    if args.editor_model:
+        # Override the env-var default by injecting into the process environment
+        # so OllamaEditorAgent._get_config() picks it up without extra plumbing.
+        _os.environ["LLMWATCH_EDITOR_MODEL"] = args.editor_model
+
     orchestrator = Orchestrator(
         parallel=not args.no_parallel,
         output_dir=output_dir,
@@ -436,17 +478,26 @@ def main(argv: list[str] | None = None) -> int:
             **vendor_scrape_context,
         },
         lookup_options={"arxiv_force_fetch": args.arxiv_force_fetch},
+        editor_options=editor_options,
     )
 
     summary = orchestrator.run()
 
     # ---- Print report to stdout in dry-run mode -------------------------- #
     if args.dry_run:
-        for result in summary["reporter_results"]:
-            for item in result.data:
+        # Prefer the edited report when the editor ran successfully.
+        editor_result = summary.get("editor_result")
+        if editor_result and editor_result.data:
+            for item in editor_result.data:
                 report_text = item.get("report", "")
                 if report_text:
                     print(report_text)
+        else:
+            for result in summary["reporter_results"]:
+                for item in result.data:
+                    report_text = item.get("report", "")
+                    if report_text:
+                        print(report_text)
 
     # ---- Summary --------------------------------------------------------- #
     watcher_count = sum(len(r.data) for r in summary["watcher_results"])

@@ -11,6 +11,7 @@ and produces a **weekly investigation report** in Markdown.
 
 - [README.md](README.md) - Project overview, usage, and architecture
 - [docs/CONSOLIDATION_QUICK_REFERENCE.md](docs/CONSOLIDATION_QUICK_REFERENCE.md) - Canonical current-state consolidation behavior and roadmap
+- [docs/EDITOR_QUICK_REFERENCE.md](docs/EDITOR_QUICK_REFERENCE.md) - Canonical current-state editor behavior and deferred follow-up work
 - [docs/llm_watch_report_2026-05-02.md](docs/llm_watch_report_2026-05-02.md) - Latest generated report snapshot (example output)
 
 ### Archived Docs (Historical)
@@ -33,8 +34,10 @@ llmwatch/
 │   │   └── vendor_scrape.py      # Watches vendor pages via HTML scraping (Phase 2)
 │   ├── lookup/
 │   │   └── arxiv.py       # Looks up arXiv papers for discovered models
-│   └── reporter.py        # Aggregates findings into a weekly Markdown report
-├── orchestrator.py        # Runs agents in three phases: watch → lookup → report
+│   ├── reporter.py        # Aggregates findings into a weekly Markdown report
+│   └── editor.py          # Post-processes the report via a local Ollama LLM (Phase 4)
+├── ollama_client.py       # Shared Ollama HTTP client (used by editor and TLDR filter)
+├── orchestrator.py        # Runs agents in four phases: watch → lookup → report → edit
 └── main.py                # CLI entry point
 ```
 
@@ -45,6 +48,7 @@ llmwatch/
 | `watcher`  | HuggingFace Models, HuggingFace Papers, Ollama, The Neuron, Vendor Blog Feeds, Vendor Scrape Sources | Fetch trending/new models/papers from public sources |
 | `lookup`   | arXiv            | Search for papers related to discovered models               |
 | `reporter` | StoryConsolidator, WeeklyReporter | Sequential reporter pipeline: consolidate stories, then render report |
+| `editor`   | OllamaEditorAgent | Optional Phase 4: refine the finished Markdown report with a local Ollama model |
 
 ## Installation
 
@@ -60,6 +64,18 @@ llm-watch
 
 # Print the report to stdout without writing a file
 llm-watch --dry-run
+
+# Run the Ollama editor pass after generating the report
+llm-watch --edit
+
+# Run with a specific editor model
+llm-watch --edit --editor-model qwen3:8b
+
+# Skip certain editor tasks (comma-separated)
+llm-watch --edit --editor-skip-tasks themes,model_digest
+
+# Enable the editor via environment variable (no CLI flag needed)
+LLMWATCH_EDITOR_ENABLED=true llm-watch
 
 # List all registered agents
 llm-watch --list-agents
@@ -262,6 +278,37 @@ If scrape sources degrade, use this table to triage quickly:
 | `0 items` warning after streak threshold | Persistent layout drift or anti-bot challenge | Inspect listing HTML and update source regex rules |
 | Request failures/timeouts | Network instability or temporary endpoint issues | Retry run; lower concurrency via `--no-parallel` |
 | Scraped links look low-signal/navigation-only | Generic links matching source pattern | Tighten per-source filtering rules in `vendor_scrape.py` |
+
+### Ollama Editor Pass (Phase 4)
+
+The `editor` agent post-processes the finished Markdown report using a local
+Ollama model.  It is **disabled by default** and must be opted into with
+`--edit` or `LLMWATCH_EDITOR_ENABLED=true`.
+
+Five independent editing tasks are available:
+
+| Task | CLI skip key | Default | Description |
+|------|--------------|---------|-------------|
+| Summary paragraph | `summary` | enabled | Injects a 4–6 sentence narrative digest below the datestamp line |
+| Fix truncations | `truncations` | enabled | Repairs TLDR entries cut off before a backtick tag |
+| Stale annotations | `stale` | enabled | Adds `<!-- stale: YYYY-MM-DD -->` to items older than 30 days |
+| Theme tags | `themes` | disabled | Adds `<!-- theme: slug -->` after each section heading |
+| Model digest | `model_digest` | disabled | Replaces Ollama/HuggingFace model-list sections with prose |
+
+Environment knobs:
+
+- `LLMWATCH_EDITOR_ENABLED` (default: `false`) — master switch
+- `LLMWATCH_EDITOR_MODEL` (default: `laguna-xs.2`) — Ollama model tag
+- `LLMWATCH_EDITOR_BASE_URL` (default: `http://localhost:11434`) — Ollama server
+- `LLMWATCH_EDITOR_TIMEOUT` (default: `120`) — HTTP timeout in seconds
+- `LLMWATCH_EDITOR_SUMMARY` (default: `true`)
+- `LLMWATCH_EDITOR_FIX_TRUNCATIONS` (default: `true`)
+- `LLMWATCH_EDITOR_ANNOTATE_STALE` (default: `true`)
+- `LLMWATCH_EDITOR_THEME_TAGS` (default: `false`)
+- `LLMWATCH_EDITOR_MODEL_DIGEST` (default: `false`)
+
+When Ollama is unavailable the editor result carries an error and the unedited
+reporter Markdown is written to disk unchanged.
 
 ### Common Links Ranking and Suppression
 

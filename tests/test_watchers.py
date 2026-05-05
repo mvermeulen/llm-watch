@@ -3,14 +3,33 @@ Unit tests for the watcher agents using mocked HTTP responses.
 """
 
 import json
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
-import responses as resp_lib
 
 from llmwatch.agents.watchers.huggingface import HuggingFaceTrendingWatcher, _extract_urls_from_card
 from llmwatch.agents.watchers.ollama import OllamaModelWatcher, _parse_ollama_library
 from llmwatch.agents.watchers import tldr_ai as tldr_mod
+
+
+def _mock_get_json(data, status_code=200):
+    mock_resp = MagicMock()
+    mock_resp.status_code = status_code
+    mock_resp.json.return_value = data
+    if status_code >= 400:
+        mock_resp.raise_for_status.side_effect = requests.HTTPError(str(status_code))
+    else:
+        mock_resp.raise_for_status.return_value = None
+    return mock_resp
+
+
+def _mock_get_text(body, status_code=200):
+    mock_resp = MagicMock()
+    mock_resp.status_code = status_code
+    mock_resp.text = body
+    mock_resp.raise_for_status.return_value = None
+    return mock_resp
 
 
 # ---- HuggingFace watcher ------------------------------------------------- #
@@ -38,16 +57,13 @@ HF_SAMPLE = [
 
 
 class TestHuggingFaceTrendingWatcher:
-    @resp_lib.activate
     def test_successful_fetch(self):
-        resp_lib.add(
-            resp_lib.GET,
-            "https://huggingface.co/api/models",
-            json=HF_SAMPLE,
-            status=200,
-        )
-        agent = HuggingFaceTrendingWatcher(limit=2)
-        result = agent.run()
+        with patch(
+            "llmwatch.agents.watchers.huggingface.requests.get",
+            return_value=_mock_get_json(HF_SAMPLE),
+        ):
+            agent = HuggingFaceTrendingWatcher(limit=2)
+            result = agent.run()
 
         assert result.ok()
         assert result.agent_name == "huggingface_trending"
@@ -60,43 +76,35 @@ class TestHuggingFaceTrendingWatcher:
         assert first["source"] == "huggingface"
         assert first["url"].startswith("https://huggingface.co/")
 
-    @resp_lib.activate
     def test_network_error_returns_error_result(self):
-        resp_lib.add(
-            resp_lib.GET,
-            "https://huggingface.co/api/models",
-            body=requests.ConnectionError("connection refused"),
-        )
-        agent = HuggingFaceTrendingWatcher()
-        result = agent.run()
+        with patch(
+            "llmwatch.agents.watchers.huggingface.requests.get",
+            side_effect=requests.ConnectionError("connection refused"),
+        ):
+            agent = HuggingFaceTrendingWatcher()
+            result = agent.run()
 
         assert not result.ok()
         assert result.data == []
         assert any("connection refused" in e for e in result.errors)
 
-    @resp_lib.activate
     def test_http_error_returns_error_result(self):
-        resp_lib.add(
-            resp_lib.GET,
-            "https://huggingface.co/api/models",
-            status=500,
-            json={"error": "Internal Server Error"},
-        )
-        agent = HuggingFaceTrendingWatcher()
-        result = agent.run()
+        with patch(
+            "llmwatch.agents.watchers.huggingface.requests.get",
+            return_value=_mock_get_json({"error": "Internal Server Error"}, status_code=500),
+        ):
+            agent = HuggingFaceTrendingWatcher()
+            result = agent.run()
 
         assert not result.ok()
 
-    @resp_lib.activate
     def test_new_sources_extracted_from_card_data(self):
-        resp_lib.add(
-            resp_lib.GET,
-            "https://huggingface.co/api/models",
-            json=HF_SAMPLE,
-            status=200,
-        )
-        agent = HuggingFaceTrendingWatcher(limit=2)
-        result = agent.run()
+        with patch(
+            "llmwatch.agents.watchers.huggingface.requests.get",
+            return_value=_mock_get_json(HF_SAMPLE),
+        ):
+            agent = HuggingFaceTrendingWatcher(limit=2)
+            result = agent.run()
 
         # mistral.ai should be detected as a new source
         assert any("mistral.ai" in s for s in result.new_sources)
@@ -148,16 +156,13 @@ OLLAMA_HTML = """
 
 
 class TestOllamaModelWatcher:
-    @resp_lib.activate
     def test_successful_scrape(self):
-        resp_lib.add(
-            resp_lib.GET,
-            "https://ollama.com/search",
-            body=OLLAMA_HTML,
-            status=200,
-        )
-        agent = OllamaModelWatcher()
-        result = agent.run()
+        with patch(
+            "llmwatch.agents.watchers.ollama.requests.get",
+            return_value=_mock_get_text(OLLAMA_HTML),
+        ):
+            agent = OllamaModelWatcher()
+            result = agent.run()
 
         assert result.ok()
         assert result.agent_name == "ollama_models"
@@ -166,15 +171,13 @@ class TestOllamaModelWatcher:
         model_ids = [d["model_id"] for d in result.data]
         assert "llama3.2" in model_ids or "mistral" in model_ids
 
-    @resp_lib.activate
     def test_network_error_returns_error_result(self):
-        resp_lib.add(
-            resp_lib.GET,
-            "https://ollama.com/search",
-            body=requests.ConnectionError("timeout"),
-        )
-        agent = OllamaModelWatcher()
-        result = agent.run()
+        with patch(
+            "llmwatch.agents.watchers.ollama.requests.get",
+            side_effect=requests.ConnectionError("timeout"),
+        ):
+            agent = OllamaModelWatcher()
+            result = agent.run()
 
         assert not result.ok()
         assert result.data == []
@@ -346,7 +349,6 @@ class TestTldrHybridFilter:
 
 
 class TestTldrDateRangeFetching:
-    @resp_lib.activate
     def test_fetch_single_edition_success(self, monkeypatch):
         from datetime import date
 
@@ -363,29 +365,39 @@ class TestTldrDateRangeFetching:
           </article>
         </section>
         """
-        resp_lib.add(
-            resp_lib.GET,
-            "https://tldr.tech/ai/2026-05-01",
-            body=tldr_html,
-            status=200,
-        )
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = tldr_html
+        mock_resp.raise_for_status.return_value = None
 
-        agent = tldr_mod.TLDRAIWatcher()
-        result = agent._fetch_single_edition(date(2026, 5, 1))
+        with patch("llmwatch.agents.watchers.tldr_ai.requests.get", return_value=mock_resp):
+            agent = tldr_mod.TLDRAIWatcher()
+            result = agent._fetch_single_edition(date(2026, 5, 1))
 
         assert result is not None
         assert len(result) == 1
         assert result[0]["model_id"] == "xAI Launched Grok 4.3"
         assert result[0]["edition_date"] == "2026-05-01"
 
-    @resp_lib.activate
     def test_fetch_single_edition_not_published(self):
         from datetime import date
 
-        resp_lib.add(
-            resp_lib.GET,
-            "https://tldr.tech/ai/2026-05-01",
-            status=302,
+        mock_resp = MagicMock()
+        mock_resp.status_code = 302
+
+        with patch("llmwatch.agents.watchers.tldr_ai.requests.get", return_value=mock_resp):
+            agent = tldr_mod.TLDRAIWatcher()
+            result = agent._fetch_single_edition(date(2026, 5, 1))
+
+        assert result is None
+
+    def test_fetch_single_edition_network_error(self, monkeypatch):
+        from datetime import date
+
+        monkeypatch.setattr(
+            tldr_mod.requests,
+            "get",
+            lambda *args, **kwargs: (_ for _ in ()).throw(requests.ConnectionError("Network error")),
         )
 
         agent = tldr_mod.TLDRAIWatcher()
@@ -393,21 +405,6 @@ class TestTldrDateRangeFetching:
 
         assert result is None
 
-    @resp_lib.activate
-    def test_fetch_single_edition_network_error(self, monkeypatch):
-        from datetime import date
-
-        def raise_error(*args, **kwargs):
-            raise requests.ConnectionError("Network error")
-
-        monkeypatch.setattr(tldr_mod.requests, "get", raise_error)
-
-        agent = tldr_mod.TLDRAIWatcher()
-        result = agent._fetch_single_edition(date(2026, 5, 1))
-
-        assert result is None
-
-    @resp_lib.activate
     def test_run_with_date_range(self, monkeypatch, tmp_path):
         from datetime import date
 
@@ -415,52 +412,41 @@ class TestTldrDateRangeFetching:
         monkeypatch.setattr(tldr_mod, "_TLDR_CACHE_PATH", str(tmp_path / "tldr_items.json"))
         monkeypatch.setattr(tldr_mod, "_classify_item", lambda *a, **k: (True, "trending_new_models"))
 
-        tldr_html_may_01 = """
-        <section>
-          <header><h3>Headlines & Launches</h3></header>
-          <article>
-            <a class="font-bold" href="https://example.com/grok-1">
-              <h3>xAI Launched Grok 4.3</h3>
-            </a>
-            <div class="newsletter-html">A powerful new model.</div>
-          </article>
-        </section>
-        """
+        def _make_html(title, url):
+            return f"""
+            <section>
+              <header><h3>Headlines & Launches</h3></header>
+              <article>
+                <a class="font-bold" href="{url}">
+                  <h3>{title}</h3>
+                </a>
+                <div class="newsletter-html">A powerful new model.</div>
+              </article>
+            </section>
+            """
 
-        tldr_html_may_02 = """
-        <section>
-          <header><h3>Headlines & Launches</h3></header>
-          <article>
-            <a class="font-bold" href="https://example.com/grok-2">
-              <h3>OpenAI Launched GPT-5</h3>
-            </a>
-            <div class="newsletter-html">Another new model.</div>
-          </article>
-        </section>
-        """
+        responses_by_url = {
+            "https://tldr.tech/ai/2026-05-01": (200, _make_html("xAI Launched Grok 4.3", "https://example.com/grok-1")),
+            "https://tldr.tech/ai/2026-05-02": (200, _make_html("OpenAI Launched GPT-5", "https://example.com/grok-2")),
+        }
 
-        resp_lib.add(
-            resp_lib.GET,
-            "https://tldr.tech/ai/2026-05-01",
-            body=tldr_html_may_01,
-            status=200,
-        )
-        resp_lib.add(
-            resp_lib.GET,
-            "https://tldr.tech/ai/2026-05-02",
-            body=tldr_html_may_02,
-            status=200,
-        )
+        def _fake_get(url, **kwargs):
+            status, text = responses_by_url.get(url, (404, ""))
+            mock_resp = MagicMock()
+            mock_resp.status_code = status
+            mock_resp.text = text
+            mock_resp.raise_for_status.return_value = None
+            return mock_resp
 
-        agent = tldr_mod.TLDRAIWatcher()
-        result = agent.run(context={"date_range": (date(2026, 5, 1), date(2026, 5, 2))})
+        with patch("llmwatch.agents.watchers.tldr_ai.requests.get", side_effect=_fake_get):
+            agent = tldr_mod.TLDRAIWatcher()
+            result = agent.run(context={"date_range": (date(2026, 5, 1), date(2026, 5, 2))})
 
         assert not result.errors
         assert len(result.data) == 2
         assert any(item["edition_date"] == "2026-05-01" for item in result.data)
         assert any(item["edition_date"] == "2026-05-02" for item in result.data)
 
-    @resp_lib.activate
     def test_run_with_date_range_partial_data(self, monkeypatch, tmp_path):
         from datetime import date
 
@@ -481,25 +467,20 @@ class TestTldrDateRangeFetching:
         """
 
         # Only May 1 is published; May 2 and 3 redirect (not published)
-        resp_lib.add(
-            resp_lib.GET,
-            "https://tldr.tech/ai/2026-05-01",
-            body=tldr_html,
-            status=200,
-        )
-        resp_lib.add(
-            resp_lib.GET,
-            "https://tldr.tech/ai/2026-05-02",
-            status=302,
-        )
-        resp_lib.add(
-            resp_lib.GET,
-            "https://tldr.tech/ai/2026-05-03",
-            status=302,
-        )
+        def _fake_get(url, **kwargs):
+            mock_resp = MagicMock()
+            if url == "https://tldr.tech/ai/2026-05-01":
+                mock_resp.status_code = 200
+                mock_resp.text = tldr_html
+            else:
+                mock_resp.status_code = 302
+                mock_resp.text = ""
+            mock_resp.raise_for_status.return_value = None
+            return mock_resp
 
-        agent = tldr_mod.TLDRAIWatcher()
-        result = agent.run(context={"date_range": (date(2026, 5, 1), date(2026, 5, 3))})
+        with patch("llmwatch.agents.watchers.tldr_ai.requests.get", side_effect=_fake_get):
+            agent = tldr_mod.TLDRAIWatcher()
+            result = agent.run(context={"date_range": (date(2026, 5, 1), date(2026, 5, 3))})
 
         assert not result.errors
         assert len(result.data) >= 1

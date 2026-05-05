@@ -2,8 +2,9 @@
 Unit tests for the arXiv lookup agent.
 """
 
+from unittest.mock import MagicMock, patch
+
 import requests
-import responses as resp_lib
 
 from llmwatch.agents.base import AgentResult
 from llmwatch.agents.lookup import arxiv as arxiv_mod
@@ -41,17 +42,18 @@ using parameter-efficient techniques.</summary>
 """
 
 
+def _mock_arxiv_response():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = ARXIV_ATOM
+    mock_resp.raise_for_status.return_value = None
+    return mock_resp
+
+
 class TestArxivLookupAgent:
-    @resp_lib.activate
     def test_successful_lookup_with_context(self, monkeypatch, tmp_path):
         monkeypatch.setattr(arxiv_mod, "_CACHE_DIR", str(tmp_path))
         monkeypatch.setattr(arxiv_mod, "_CACHE_PATH", str(tmp_path / "arxiv_cache.json"))
-        resp_lib.add(
-            resp_lib.GET,
-            "https://export.arxiv.org/api/query",
-            body=ARXIV_ATOM,
-            status=200,
-        )
         context = {
             "watcher_results": [
                 AgentResult(
@@ -61,9 +63,13 @@ class TestArxivLookupAgent:
                 )
             ]
         }
-        agent = ArxivLookupAgent()
-        agent.max_terms = 1
-        result = agent.run(context=context)
+        with patch(
+            "llmwatch.agents.lookup.arxiv.requests.get",
+            return_value=_mock_arxiv_response(),
+        ):
+            agent = ArxivLookupAgent()
+            agent.max_terms = 1
+            result = agent.run(context=context)
 
         assert result.agent_name == "arxiv_lookup"
         assert result.category == "lookup"
@@ -74,33 +80,24 @@ class TestArxivLookupAgent:
         assert "authors" in paper
         assert "published" in paper
 
-    @resp_lib.activate
     def test_fallback_default_query_when_no_context(self, monkeypatch, tmp_path):
         monkeypatch.setattr(arxiv_mod, "_CACHE_DIR", str(tmp_path))
         monkeypatch.setattr(arxiv_mod, "_CACHE_PATH", str(tmp_path / "arxiv_cache.json"))
-        resp_lib.add(
-            resp_lib.GET,
-            "https://export.arxiv.org/api/query",
-            body=ARXIV_ATOM,
-            status=200,
-        )
-        agent = ArxivLookupAgent()
-        agent.max_terms = 1
-        result = agent.run(context=None)
+        with patch(
+            "llmwatch.agents.lookup.arxiv.requests.get",
+            return_value=_mock_arxiv_response(),
+        ):
+            agent = ArxivLookupAgent()
+            agent.max_terms = 1
+            result = agent.run(context=None)
 
         assert result.agent_name == "arxiv_lookup"
         # Even without context we still get results
         assert isinstance(result.data, list)
 
-    @resp_lib.activate
     def test_network_error_recorded_in_errors(self, monkeypatch, tmp_path):
         monkeypatch.setattr(arxiv_mod, "_CACHE_DIR", str(tmp_path))
         monkeypatch.setattr(arxiv_mod, "_CACHE_PATH", str(tmp_path / "arxiv_cache.json"))
-        resp_lib.add(
-            resp_lib.GET,
-            "https://export.arxiv.org/api/query",
-            body=requests.ConnectionError("connection error"),
-        )
         context = {
             "watcher_results": [
                 AgentResult(
@@ -110,49 +107,41 @@ class TestArxivLookupAgent:
                 )
             ]
         }
-        agent = ArxivLookupAgent()
-        agent.max_terms = 1
-        result = agent.run(context=context)
+        with patch(
+            "llmwatch.agents.lookup.arxiv.requests.get",
+            side_effect=requests.ConnectionError("connection error"),
+        ):
+            agent = ArxivLookupAgent()
+            agent.max_terms = 1
+            result = agent.run(context=context)
 
         assert len(result.errors) >= 1
 
     def test_deduplicates_papers(self, monkeypatch, tmp_path):
         monkeypatch.setattr(arxiv_mod, "_CACHE_DIR", str(tmp_path))
         monkeypatch.setattr(arxiv_mod, "_CACHE_PATH", str(tmp_path / "arxiv_cache.json"))
-        resp_lib.start()
-        try:
-            resp_lib.add(
-                resp_lib.GET,
-                "https://export.arxiv.org/api/query",
-                body=ARXIV_ATOM,
-                status=200,
-            )
-            resp_lib.add(
-                resp_lib.GET,
-                "https://export.arxiv.org/api/query",
-                body=ARXIV_ATOM,
-                status=200,
-            )
-            context = {
-                "watcher_results": [
-                    AgentResult(
-                        agent_name="huggingface_trending",
-                        category="watcher",
-                        data=[
-                            {"model_id": "meta-llama/Llama-3-8B", "tags": []},
-                            {"model_id": "google/Gemma-2-9B", "tags": []},
-                        ],
-                    )
-                ]
-            }
+        context = {
+            "watcher_results": [
+                AgentResult(
+                    agent_name="huggingface_trending",
+                    category="watcher",
+                    data=[
+                        {"model_id": "meta-llama/Llama-3-8B", "tags": []},
+                        {"model_id": "google/Gemma-2-9B", "tags": []},
+                    ],
+                )
+            ]
+        }
+        with patch(
+            "llmwatch.agents.lookup.arxiv.requests.get",
+            return_value=_mock_arxiv_response(),
+        ):
             agent = ArxivLookupAgent()
             agent.max_terms = 2
             result = agent.run(context=context)
-            urls = [p["url"] for p in result.data]
-            assert len(urls) == len(set(urls)), "Duplicate URLs should be removed"
-        finally:
-            resp_lib.stop()
-            resp_lib.reset()
+
+        urls = [p["url"] for p in result.data]
+        assert len(urls) == len(set(urls)), "Duplicate URLs should be removed"
 
     def test_uses_cache_before_fetch(self, monkeypatch, tmp_path):
         cache_file = tmp_path / "arxiv_cache.json"
