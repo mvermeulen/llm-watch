@@ -30,8 +30,8 @@ _DEFAULT_LOOKBACK_DAYS = 14
 _DEFAULT_MAX_ITEMS = 20
 _DEFAULT_RETRY_ATTEMPTS = 3
 _DEFAULT_HEALTH_WARNING_STREAK = 2
-_CACHE_DIR = ".llmwatch_cache"
-_HEALTH_CACHE_PATH = os.path.join(_CACHE_DIR, "vendor_scrape_health.json")
+from llmwatch.cache import get_cache_dir as _get_cache_dir
+_HEALTH_CACHE_PATH = os.path.join(_get_cache_dir(), "vendor_scrape_health.json")
 _HEALTH_LOCK = threading.Lock()
 
 _A_TAG_RE = re.compile(
@@ -479,7 +479,7 @@ def _load_health_cache() -> dict[str, Any]:
 
 
 def _save_health_cache(cache: dict[str, Any]) -> None:
-    os.makedirs(_CACHE_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(_HEALTH_CACHE_PATH), exist_ok=True)
     with open(_HEALTH_CACHE_PATH, "w", encoding="utf-8") as fh:
         json.dump(cache, fh, indent=2, sort_keys=True)
 

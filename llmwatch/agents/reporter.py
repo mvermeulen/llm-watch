@@ -15,6 +15,7 @@ from datetime import date
 from typing import Any
 
 from llmwatch.agents.base import AgentResult, BaseAgent, registry
+from llmwatch.agents.read_tracker import load_read_urls, normalize_url
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,8 @@ class WeeklyReporterAgent(BaseAgent):
         watcher_results: list[AgentResult] = context.get("watcher_results", [])
         lookup_results: list[AgentResult] = context.get("lookup_results", [])
         consolidated_stories: list[dict[str, Any]] = context.get("consolidated_stories", [])
+
+        read_urls = load_read_urls()
 
         today = date.today().isoformat()
         lines: list[str] = []
@@ -133,26 +136,32 @@ class WeeklyReporterAgent(BaseAgent):
                 render_common_links(repeated_references[:10], start_idx=idx)
 
             if suppressed_stories:
-                lines.append("### Suppressed Repeated Links")
-                lines.append("")
-                lines.append(
-                    "Filtered by suppression rules (for example sponsor or low-signal social links)."
-                )
-                lines.append("")
-                reason_labels = {
-                    "sponsor_link": "sponsor",
-                    "single_source_social": "single-source social",
-                    "domain_suppressed": "suppressed domain",
-                }
-                for story in suppressed_stories[:10]:
-                    primary = story.get("primary_item", {})
-                    title = primary.get("model_id", primary.get("name", "Suppressed Link"))
-                    url = primary.get("url", "")
-                    reason = story.get("suppression_reason", "suppressed")
-                    reason_text = reason_labels.get(reason, reason.replace("_", " "))
-                    link = f"[{title}]({url})" if url else f"**{title}**"
-                    lines.append(f"- {link} ({reason_text})")
-                lines.append("")
+                # Exclude "already_read" stories from the suppressed section – they are
+                # intentionally hidden and don't need to appear anywhere in the report.
+                displayable_suppressed = [
+                    s for s in suppressed_stories if s.get("suppression_reason") != "already_read"
+                ]
+                if displayable_suppressed:
+                    lines.append("### Suppressed Repeated Links")
+                    lines.append("")
+                    lines.append(
+                        "Filtered by suppression rules (for example sponsor or low-signal social links)."
+                    )
+                    lines.append("")
+                    reason_labels = {
+                        "sponsor_link": "sponsor",
+                        "single_source_social": "single-source social",
+                        "domain_suppressed": "suppressed domain",
+                    }
+                    for story in displayable_suppressed[:10]:
+                        primary = story.get("primary_item", {})
+                        title = primary.get("model_id", primary.get("name", "Suppressed Link"))
+                        url = primary.get("url", "")
+                        reason = story.get("suppression_reason", "suppressed")
+                        reason_text = reason_labels.get(reason, reason.replace("_", " "))
+                        link = f"[{title}]({url})" if url else f"**{title}**"
+                        lines.append(f"- {link} ({reason_text})")
+                    lines.append("")
             
             lines.append("---")
             lines.append("")
@@ -190,6 +199,9 @@ class WeeklyReporterAgent(BaseAgent):
                     desc = item.get("description", "")
                     tags = item.get("tags", [])
                     source = item.get("source", "")
+
+                    if read_urls and url and normalize_url(url) in read_urls:
+                        continue
 
                     if source == "lastweekinai_podcast":
                         if "podcast_summary" in tags:

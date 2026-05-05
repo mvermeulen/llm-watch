@@ -217,5 +217,8 @@ __marimo__/
 # llm-watch runtime cache
 .llmwatch_cache/
 
+# llm-watch generated reports
+llm_watch_report_*.md
+
 # Streamlit
 .streamlit/secrets.toml

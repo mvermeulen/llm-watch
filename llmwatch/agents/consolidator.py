@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from llmwatch.agents.base import AgentResult, BaseAgent, registry
+from llmwatch.agents.read_tracker import load_read_urls
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,11 @@ class StoryConsolidatorAgent(BaseAgent):
 
         if domain and domain in suppressed_domains:
             return "domain_suppressed"
+
+        read_urls: frozenset[str] = self.config.get("read_urls", frozenset())
+        norm_url = _normalize_url(url)
+        if norm_url and norm_url in read_urls:
+            return "already_read"
 
         if self.config.get("suppress_sponsors", True) and link_type == "sponsor":
             return "sponsor_link"
@@ -340,6 +346,9 @@ class StoryConsolidatorAgent(BaseAgent):
     
     def run(self, context: dict[str, Any] | None = None) -> AgentResult:
         context = context or {}
+        # Refresh read URLs on every run so marks applied after agent registration
+        # are picked up without needing to reinstantiate the agent.
+        self.config["read_urls"] = load_read_urls()
         watcher_results = context.get("watcher_results", [])
         lookup_results = context.get("lookup_results", [])
         

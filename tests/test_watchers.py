@@ -293,7 +293,6 @@ class TestTldrHybridFilter:
                 assert data[0]["include_in_trending"] is False
                 assert data[0]["tldr_local_category"] == "model_analysis"
     def test_merge_with_cached_tldr_items_deduplicates_by_url(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(tldr_mod, "_TLDR_CACHE_DIR", str(tmp_path))
         monkeypatch.setattr(tldr_mod, "_TLDR_CACHE_PATH", str(tmp_path / "tldr_items.json"))
         monkeypatch.setattr(tldr_mod, "_TLDR_HISTORY_DAYS", 30)
 
@@ -323,7 +322,6 @@ class TestTldrHybridFilter:
         assert merged[0]["edition_date"] == "2026-05-02"
 
     def test_merge_with_cached_tldr_items_prunes_old_entries(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(tldr_mod, "_TLDR_CACHE_DIR", str(tmp_path))
         monkeypatch.setattr(tldr_mod, "_TLDR_CACHE_PATH", str(tmp_path / "tldr_items.json"))
         monkeypatch.setattr(tldr_mod, "_TLDR_HISTORY_DAYS", 1)
 
@@ -408,7 +406,6 @@ class TestTldrDateRangeFetching:
     def test_run_with_date_range(self, monkeypatch, tmp_path):
         from datetime import date
 
-        monkeypatch.setattr(tldr_mod, "_TLDR_CACHE_DIR", str(tmp_path))
         monkeypatch.setattr(tldr_mod, "_TLDR_CACHE_PATH", str(tmp_path / "tldr_items.json"))
         monkeypatch.setattr(tldr_mod, "_classify_item", lambda *a, **k: (True, "trending_new_models"))
 
@@ -450,7 +447,6 @@ class TestTldrDateRangeFetching:
     def test_run_with_date_range_partial_data(self, monkeypatch, tmp_path):
         from datetime import date
 
-        monkeypatch.setattr(tldr_mod, "_TLDR_CACHE_DIR", str(tmp_path))
         monkeypatch.setattr(tldr_mod, "_TLDR_CACHE_PATH", str(tmp_path / "tldr_items.json"))
         monkeypatch.setattr(tldr_mod, "_classify_item", lambda *a, **k: (True, "trending_new_models"))
 

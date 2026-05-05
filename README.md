@@ -10,14 +10,19 @@ and produces a **weekly investigation report** in Markdown.
 ### Active Docs
 
 - [README.md](README.md) - Project overview, usage, and architecture
+- [CHANGELOG.md](CHANGELOG.md) - Release notes and notable project changes
 - [docs/CONSOLIDATION_QUICK_REFERENCE.md](docs/CONSOLIDATION_QUICK_REFERENCE.md) - Canonical current-state consolidation behavior and roadmap
 - [docs/EDITOR_QUICK_REFERENCE.md](docs/EDITOR_QUICK_REFERENCE.md) - Canonical current-state editor behavior and deferred follow-up work
-- [docs/llm_watch_report_2026-05-02.md](docs/llm_watch_report_2026-05-02.md) - Latest generated report snapshot (example output)
+- [llm_watch_report_2026-05-05.md](llm_watch_report_2026-05-05.md) - Latest generated report snapshot (example output)
 
 ### Archived Docs (Historical)
 
 - [docs/CONSOLIDATION_AGENT_INVESTIGATION.md](docs/CONSOLIDATION_AGENT_INVESTIGATION.md) - Design investigation and decision record before implementation
 - [docs/PHASE_1_MVP_IMPLEMENTATION.md](docs/PHASE_1_MVP_IMPLEMENTATION.md) - Phase 1 implementation runbook used during initial rollout
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes and notable changes.
 
 ## Architecture
 
@@ -127,12 +132,56 @@ llm-watch --vendor-scrape-lookback-days 14 --vendor-scrape-max-items 10
 
 # Per-source scrape limits with aliases
 llm-watch --vendor-scrape-source-limits "meta=8,anthropic=6,mistral=6,xai=6"
+
+# Mark specific URLs as read so they are suppressed in future reports
+llm-watch --mark-read https://example.com/story-a https://example.com/story-b
+
+# Mark every link from a generated report as read
+llm-watch --mark-read-from-report llm_watch_report_2026-05-05.md
+
+# Mark only links inside a specific H2 section
+llm-watch --mark-read-from-report llm_watch_report_2026-05-05.md --section "Common Links"
+
+# Inspect or reset read-tracking state
+llm-watch --list-read
+llm-watch --unmark-read https://example.com/story-a
+llm-watch --clear-read
 ```
 
 Or run as a module:
 
 ```bash
 python -m llmwatch.main [options]
+```
+
+### Read Tracking
+
+Use read tracking to exclude already reviewed stories from future report runs.
+
+- Mark individual URLs: `--mark-read URL ...`
+- Mark all links from a report file: `--mark-read-from-report FILE`
+- Scope report import to one section: `--section "Common Links"`
+- List entries: `--list-read`
+- Remove entries: `--unmark-read URL ...`
+- Clear all entries: `--clear-read`
+
+Read URLs are normalized before comparison (query strings, fragments, and
+trailing slashes are stripped), so tracking remains stable across URL variants.
+
+### Cache Directory
+
+All on-disk caches (read tracker, arXiv lookup, TLDR cache, vendor scrape
+health cache) use a shared cache directory.
+
+- Default directory: `.llmwatch_cache` (relative to current working directory)
+- Override with env var: `LLMWATCH_CACHE_DIR=/absolute/path`
+
+Examples:
+
+```bash
+# Keep all llm-watch cache files in one stable location
+export LLMWATCH_CACHE_DIR=/home/me/.cache/llm-watch
+llm-watch
 ```
 
 ### arXiv Lookup Caching
@@ -144,6 +193,9 @@ network calls.
 - Default behavior: look up each normalized query term in cache first
 - Override behavior: use `--arxiv-force-fetch` to bypass cache and fetch all
    terms directly from arXiv
+
+If `LLMWATCH_CACHE_DIR` is set, the cache file location becomes
+`$LLMWATCH_CACHE_DIR/arxiv_lookup_cache.json`.
 
 ### TLDR Local Hybrid Filter (Ollama)
 
@@ -160,6 +212,9 @@ TLDR items are cached so daily fetches can be merged into less-frequent reports.
 - Fetch-only mode: `--tldr-fetch-only` updates the TLDR cache without generating
   a report
 - Weekly/full report runs read merged cached TLDR items from recent history
+
+If `LLMWATCH_CACHE_DIR` is set, the cache file location becomes
+`$LLMWATCH_CACHE_DIR/tldr_items.json`.
 
 #### Fetching TLDR Data for a Date Range
 

@@ -273,6 +273,56 @@ def _build_parser() -> argparse.ArgumentParser:
             "Choices: summary, truncations, stale, themes, model_digest."
         ),
     )
+
+    # ---- Read-tracking commands ----------------------------------------- #
+    read_group = parser.add_argument_group(
+        "read tracking",
+        "Mark stories as read so they are excluded from future reports.",
+    )
+    read_group.add_argument(
+        "--mark-read",
+        nargs="+",
+        metavar="URL",
+        help=(
+            "Mark one or more story URLs as read.  Matched URLs will be "
+            "suppressed from all future reports.  URLs are normalized "
+            "(query strings and fragments are stripped)."
+        ),
+    )
+    read_group.add_argument(
+        "--unmark-read",
+        nargs="+",
+        metavar="URL",
+        help="Remove one or more URLs from the read list.",
+    )
+    read_group.add_argument(
+        "--list-read",
+        action="store_true",
+        help="List all URLs currently marked as read and exit.",
+    )
+    read_group.add_argument(
+        "--clear-read",
+        action="store_true",
+        help="Remove ALL entries from the read list and exit.",
+    )
+    read_group.add_argument(
+        "--mark-read-from-report",
+        metavar="FILE",
+        help=(
+            "Parse a generated report Markdown file and mark every linked URL "
+            "in it as read.  Combine with --section to restrict to one section "
+            "of the report (e.g. \"Common Links\")."
+        ),
+    )
+    read_group.add_argument(
+        "--section",
+        metavar="NAME",
+        help=(
+            "H2 section name to restrict --mark-read-from-report to "
+            "(case-insensitive substring match, e.g. \"Common Links\")."
+        ),
+    )
+
     return parser
 
 
@@ -299,6 +349,66 @@ def main(argv: list[str] | None = None) -> int:
         print("Registered agents:")
         for agent in registry.agents():
             print(f"  [{agent.category:10s}]  {agent.name}")
+        return 0
+
+    # ---- Read-tracking commands ----------------------------------------- #
+    from llmwatch.agents.read_tracker import (
+        mark_read as _mark_read,
+        unmark_read as _unmark_read,
+        list_read as _list_read,
+        clear_read as _clear_read,
+        parse_report_urls as _parse_report_urls,
+    )
+
+    if args.clear_read:
+        removed = _clear_read()
+        print(f"Read list cleared ({removed} entry/entries removed).")
+        return 0
+
+    if args.list_read:
+        entries = _list_read()
+        if not entries:
+            print("Read list is empty.")
+        else:
+            print(f"Read list ({len(entries)} entry/entries):")
+            for entry in entries:
+                title_part = f"  {entry['title']}" if entry.get("title") else ""
+                print(f"  [{entry['marked_at']}] {entry['url']}{title_part}")
+        return 0
+
+    if args.mark_read:
+        added = _mark_read(args.mark_read)
+        skipped = len(args.mark_read) - added
+        msg = f"{added} URL(s) marked as read"
+        if skipped:
+            msg += f" ({skipped} already present)"
+        print(msg + ".")
+        return 0
+
+    if args.unmark_read:
+        removed = _unmark_read(args.unmark_read)
+        print(f"{removed} URL(s) removed from the read list.")
+        return 0
+
+    if args.mark_read_from_report:
+        try:
+            url_titles = _parse_report_urls(args.mark_read_from_report, section=args.section)
+        except FileNotFoundError as exc:
+            logging.getLogger(__name__).error("%s", exc)
+            return 1
+
+        if not url_titles:
+            scope = f" in section '{args.section}'" if args.section else ""
+            print(f"No links found{scope} in '{args.mark_read_from_report}'.")
+            return 0
+
+        added = _mark_read(list(url_titles.keys()), titles=url_titles)
+        skipped = len(url_titles) - added
+        scope = f" from section '{args.section}'" if args.section else ""
+        msg = f"{added} URL(s) marked as read{scope}"
+        if skipped:
+            msg += f" ({skipped} already present)"
+        print(msg + ".")
         return 0
 
     if args.tldr_fetch_only:

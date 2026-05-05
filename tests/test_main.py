@@ -260,7 +260,6 @@ class TestVendorScrapeFetchOnlyIntegration:
             "_HEALTH_CACHE_PATH",
             str(tmp_path / "vendor_scrape_health.json"),
         )
-        monkeypatch.setattr(vendor_scrape, "_CACHE_DIR", str(tmp_path))
 
         class _FakeResp:
             def __init__(self, text: str, status_code: int = 200):
@@ -315,7 +314,6 @@ class TestVendorScrapeFetchOnlyIntegration:
             "_HEALTH_CACHE_PATH",
             str(tmp_path / "vendor_scrape_health.json"),
         )
-        monkeypatch.setattr(vendor_scrape, "_CACHE_DIR", str(tmp_path))
 
         class _FakeResp:
             def __init__(self, text: str, status_code: int = 200):
@@ -366,7 +364,6 @@ class TestVendorScrapeFetchOnlyIntegration:
             "_HEALTH_CACHE_PATH",
             str(tmp_path / "vendor_scrape_health.json"),
         )
-        monkeypatch.setattr(vendor_scrape, "_CACHE_DIR", str(tmp_path))
 
         class _FakeResp:
             def __init__(self, text: str, status_code: int = 200):

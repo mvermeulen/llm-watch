@@ -29,8 +29,8 @@ _STRIP_TAGS_RE = re.compile(r"<[^>]+>")
 _OLLAMA_API_URL = os.getenv("LLMWATCH_OLLAMA_API_URL", "http://localhost:11434/api/generate")
 _OLLAMA_FILTER_MODEL = os.getenv("LLMWATCH_TLDR_FILTER_MODEL", "llama3.2:3b")
 _OLLAMA_REQUEST_TIMEOUT = 25
-_TLDR_CACHE_DIR = ".llmwatch_cache"
-_TLDR_CACHE_PATH = os.path.join(_TLDR_CACHE_DIR, "tldr_items.json")
+from llmwatch.cache import get_cache_dir as _get_cache_dir
+_TLDR_CACHE_PATH = os.path.join(_get_cache_dir(), "tldr_items.json")
 _TLDR_HISTORY_DAYS = int(os.getenv("LLMWATCH_TLDR_HISTORY_DAYS", "14"))
 
 # Sponsor link domains to skip
@@ -304,7 +304,7 @@ def _load_cached_tldr_items() -> list[dict[str, Any]]:
 
 def _save_cached_tldr_items(items: list[dict[str, Any]]) -> None:
     try:
-        os.makedirs(_TLDR_CACHE_DIR, exist_ok=True)
+        os.makedirs(os.path.dirname(_TLDR_CACHE_PATH), exist_ok=True)
         with open(_TLDR_CACHE_PATH, "w", encoding="utf-8") as fh:
             json.dump(items, fh, ensure_ascii=False, indent=2)
     except OSError as exc:

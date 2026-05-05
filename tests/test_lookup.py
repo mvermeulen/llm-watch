@@ -52,7 +52,6 @@ def _mock_arxiv_response():
 
 class TestArxivLookupAgent:
     def test_successful_lookup_with_context(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(arxiv_mod, "_CACHE_DIR", str(tmp_path))
         monkeypatch.setattr(arxiv_mod, "_CACHE_PATH", str(tmp_path / "arxiv_cache.json"))
         context = {
             "watcher_results": [
@@ -81,7 +80,6 @@ class TestArxivLookupAgent:
         assert "published" in paper
 
     def test_fallback_default_query_when_no_context(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(arxiv_mod, "_CACHE_DIR", str(tmp_path))
         monkeypatch.setattr(arxiv_mod, "_CACHE_PATH", str(tmp_path / "arxiv_cache.json"))
         with patch(
             "llmwatch.agents.lookup.arxiv.requests.get",
@@ -96,7 +94,6 @@ class TestArxivLookupAgent:
         assert isinstance(result.data, list)
 
     def test_network_error_recorded_in_errors(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(arxiv_mod, "_CACHE_DIR", str(tmp_path))
         monkeypatch.setattr(arxiv_mod, "_CACHE_PATH", str(tmp_path / "arxiv_cache.json"))
         context = {
             "watcher_results": [
@@ -118,7 +115,6 @@ class TestArxivLookupAgent:
         assert len(result.errors) >= 1
 
     def test_deduplicates_papers(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(arxiv_mod, "_CACHE_DIR", str(tmp_path))
         monkeypatch.setattr(arxiv_mod, "_CACHE_PATH", str(tmp_path / "arxiv_cache.json"))
         context = {
             "watcher_results": [
@@ -145,7 +141,6 @@ class TestArxivLookupAgent:
 
     def test_uses_cache_before_fetch(self, monkeypatch, tmp_path):
         cache_file = tmp_path / "arxiv_cache.json"
-        monkeypatch.setattr(arxiv_mod, "_CACHE_DIR", str(tmp_path))
         monkeypatch.setattr(arxiv_mod, "_CACHE_PATH", str(cache_file))
 
         term = "Llama Alpha"
@@ -187,7 +182,6 @@ class TestArxivLookupAgent:
 
     def test_force_fetch_bypasses_cache(self, monkeypatch, tmp_path):
         cache_file = tmp_path / "arxiv_cache.json"
-        monkeypatch.setattr(arxiv_mod, "_CACHE_DIR", str(tmp_path))
         monkeypatch.setattr(arxiv_mod, "_CACHE_PATH", str(cache_file))
 
         term = "Llama Alpha"

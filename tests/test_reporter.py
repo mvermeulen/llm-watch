@@ -368,7 +368,8 @@ class TestWeeklyReporterAgent:
         assert "(sponsor)" in report
         assert report.index("Visible Link") < report.index("Suppressed Sponsor")
 
-    def test_scrape_description_strips_trailing_html_fragments(self):
+    def test_scrape_description_strips_trailing_html_fragments(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("LLMWATCH_CACHE_DIR", str(tmp_path))
         agent = WeeklyReporterAgent()
         ctx = {
             "watcher_results": [

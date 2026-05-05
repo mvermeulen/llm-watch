@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 _ARXIV_API_URL = "https://export.arxiv.org/api/query"
 _MAX_RESULTS_PER_QUERY = 3
 _REQUEST_TIMEOUT = 20
-_CACHE_DIR = ".llmwatch_cache"
-_CACHE_PATH = os.path.join(_CACHE_DIR, "arxiv_lookup_cache.json")
+from llmwatch.cache import get_cache_dir as _get_cache_dir
+_CACHE_PATH = os.path.join(_get_cache_dir(), "arxiv_lookup_cache.json")
 
 # arXiv Atom namespace
 _ATOM_NS = "http://www.w3.org/2005/Atom"
@@ -167,7 +167,7 @@ def _load_cache() -> dict[str, list[dict[str, Any]]]:
 def _save_cache(cache: dict[str, list[dict[str, Any]]]) -> None:
     """Persist cache to disk. Errors are non-fatal for report generation."""
     try:
-        os.makedirs(_CACHE_DIR, exist_ok=True)
+        os.makedirs(os.path.dirname(_CACHE_PATH), exist_ok=True)
         with open(_CACHE_PATH, "w", encoding="utf-8") as fh:
             json.dump(cache, fh, ensure_ascii=False, indent=2)
     except OSError as exc:

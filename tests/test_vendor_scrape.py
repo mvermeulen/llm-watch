@@ -142,7 +142,6 @@ def test_vendor_scrape_health_warning_on_zero_items(monkeypatch, caplog, tmp_pat
         "_HEALTH_CACHE_PATH",
         str(tmp_path / "vendor_scrape_health.json"),
     )
-    monkeypatch.setattr(scrape_mod, "_CACHE_DIR", str(tmp_path))
     html = "<html><body><a href=\"/about\">About</a></body></html>"
     monkeypatch.setattr(scrape_mod.requests, "get", lambda *args, **kwargs: _FakeResp(html))
 
@@ -183,7 +182,6 @@ def test_vendor_scrape_health_streak_persists_and_resets(monkeypatch, tmp_path):
         "_HEALTH_CACHE_PATH",
         str(tmp_path / "vendor_scrape_health.json"),
     )
-    monkeypatch.setattr(scrape_mod, "_CACHE_DIR", str(tmp_path))
 
     # First run: zero items increments streak to 1.
     monkeypatch.setattr(
