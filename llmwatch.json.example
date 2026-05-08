@@ -1,0 +1,8 @@
+{
+  "watchers": {
+    "disabled": [
+      "tldr_ai",
+      "meta_ai_blog_scrape"
+    ]
+  }
+}

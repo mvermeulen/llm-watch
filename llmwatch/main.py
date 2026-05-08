@@ -153,6 +153,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help="List all registered agents and exit.",
     )
     parser.add_argument(
+        "--config-file",
+        metavar="FILE",
+        help=(
+            "Load configuration from a YAML or JSON file "
+            "(e.g., llmwatch.yaml). Can also be set via LLMWATCH_CONFIG environment variable."
+        ),
+    )
+    parser.add_argument(
+        "--enable-watcher",
+        action="append",
+        dest="enable_watchers",
+        metavar="NAME",
+        help=(
+            "Enable a specific watcher (can be used multiple times). "
+            "Takes precedence over config file and --disable-watcher."
+        ),
+    )
+    parser.add_argument(
+        "--disable-watcher",
+        action="append",
+        dest="disable_watchers",
+        metavar="NAME",
+        help=(
+            "Disable a specific watcher (can be used multiple times). "
+            "Takes precedence over config file."
+        ),
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable debug-level logging.",
@@ -578,6 +606,94 @@ def main(argv: list[str] | None = None) -> int:
         # so OllamaEditorAgent._get_config() picks it up without extra plumbing.
         _os.environ["LLMWATCH_EDITOR_MODEL"] = args.editor_model
 
+    # ---- Load watcher configuration -------------------------------------- #
+    from llmwatch import config as config_module
+    
+    enabled_watchers: set[str] | None = None
+    config_file_path = args.config_file or config_module.get_config_path()
+    
+    if config_file_path:
+        try:
+            logger = logging.getLogger(__name__)
+            logger.info("Loading configuration from: %s", config_file_path)
+            config_dict = config_module.load_config_file(config_file_path)
+            watcher_config = config_module.parse_watcher_config(config_dict)
+            
+            # Get all available watcher agent names
+            available_watchers = [a.name for a in registry.agents(category="watcher")]
+            
+            # Resolve which watchers should be enabled
+            cli_enabled = args.enable_watchers or []
+            cli_disabled = args.disable_watchers or []
+            
+            enabled_watchers = config_module.resolve_enabled_watchers(
+                available_watchers,
+                config_enabled=watcher_config.get("enabled"),
+                config_disabled=watcher_config.get("disabled"),
+                cli_enabled=cli_enabled,
+                cli_disabled=cli_disabled,
+            )
+            
+            # Validate CLI-specified watcher names
+            if cli_enabled:
+                valid, invalid = config_module.validate_watcher_names(
+                    cli_enabled, available_watchers
+                )
+                if invalid:
+                    logger.warning(
+                        "Unknown watcher name(s) in --enable-watcher: %s. Valid names: %s",
+                        ", ".join(invalid),
+                        ", ".join(sorted(available_watchers)),
+                    )
+            
+            if cli_disabled:
+                valid, invalid = config_module.validate_watcher_names(
+                    cli_disabled, available_watchers
+                )
+                if invalid:
+                    logger.warning(
+                        "Unknown watcher name(s) in --disable-watcher: %s. Valid names: %s",
+                        ", ".join(invalid),
+                        ", ".join(sorted(available_watchers)),
+                    )
+            
+            if enabled_watchers:
+                logger.info(
+                    "Enabled watchers: %s",
+                    ", ".join(sorted(enabled_watchers)),
+                )
+                disabled_count = len(available_watchers) - len(enabled_watchers)
+                if disabled_count > 0:
+                    logger.info("Disabled watchers: %d", disabled_count)
+        
+        except FileNotFoundError as exc:
+            if args.config_file:  # Only error if explicitly specified
+                logging.getLogger(__name__).error("%s", exc)
+                return 1
+            # Silently ignore if default path doesn't exist
+        except (ValueError, ImportError) as exc:
+            logging.getLogger(__name__).error("Configuration error: %s", exc)
+            return 1
+    
+    elif args.enable_watchers or args.disable_watchers:
+        # CLI options provided without a config file
+        available_watchers = [a.name for a in registry.agents(category="watcher")]
+        cli_enabled = args.enable_watchers or []
+        cli_disabled = args.disable_watchers or []
+        
+        enabled_watchers = config_module.resolve_enabled_watchers(
+            available_watchers,
+            cli_enabled=cli_enabled,
+            cli_disabled=cli_disabled,
+        )
+        
+        if enabled_watchers:
+            logger = logging.getLogger(__name__)
+            logger.info(
+                "Enabled watchers (CLI): %s",
+                ", ".join(sorted(enabled_watchers)),
+            )
+
     orchestrator = Orchestrator(
         parallel=not args.no_parallel,
         output_dir=output_dir,
@@ -589,6 +705,7 @@ def main(argv: list[str] | None = None) -> int:
         },
         lookup_options={"arxiv_force_fetch": args.arxiv_force_fetch},
         editor_options=editor_options,
+        enabled_watchers=enabled_watchers,
     )
 
     summary = orchestrator.run()

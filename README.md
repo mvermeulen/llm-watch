@@ -13,7 +13,6 @@ and produces a **weekly investigation report** in Markdown.
 - [CHANGELOG.md](CHANGELOG.md) - Release notes and notable project changes
 - [docs/CONSOLIDATION_QUICK_REFERENCE.md](docs/CONSOLIDATION_QUICK_REFERENCE.md) - Canonical current-state consolidation behavior and roadmap
 - [docs/EDITOR_QUICK_REFERENCE.md](docs/EDITOR_QUICK_REFERENCE.md) - Canonical current-state editor behavior and deferred follow-up work
-- [llm_watch_report_2026-05-05.md](llm_watch_report_2026-05-05.md) - Latest generated report snapshot (example output)
 
 ### Archived Docs (Historical)
 
@@ -152,6 +151,89 @@ Or run as a module:
 
 ```bash
 python -m llmwatch.main [options]
+```
+
+### Watcher Configuration
+
+By default, all watchers run during each invocation. You can selectively enable or disable specific watchers using a configuration file or CLI flags.
+
+#### Configuration File
+
+Create a `llmwatch.yaml` (or `llmwatch.json`) in your working directory, or set `LLMWATCH_CONFIG` to point to your config file:
+
+```yaml
+watchers:
+  # Option 1: Whitelist specific watchers (only these run)
+  enabled:
+    - ollama_models
+    - huggingface_trending
+    - tldr_ai
+    - neuron_feed
+
+  # Option 2: Blacklist specific watchers (all except these run)
+  disabled:
+    - meta_ai_blog_scrape
+    - xai_news_scrape
+```
+
+#### Available Watchers
+
+| Watcher Name | Source |
+|---|---|
+| `ollama_models` | Ollama model library |
+| `huggingface_trending` | HuggingFace trending models |
+| `huggingface_trending_papers` | HuggingFace trending papers |
+| `tldr_ai` | TLDR AI newsletter |
+| `neuron_feed` | The Neuron Atom feed |
+| `lastweekinai_podcast` | Last Week in AI podcast |
+| `openai_news_feed` | OpenAI blog feed |
+| `google_ai_blog_feed` | Google AI blog feed |
+| `deepmind_blog_feed` | DeepMind blog feed |
+| `microsoft_ai_blog_feed` | Microsoft AI blog feed |
+| `aws_ml_blog_feed` | AWS ML blog feed |
+| `qwen_blog_feed` | Qwen blog feed |
+| `meta_ai_blog_scrape` | Meta AI blog (scraping) |
+| `anthropic_news_scrape` | Anthropic news (scraping) |
+| `mistral_news_scrape` | Mistral AI news (scraping) |
+| `xai_news_scrape` | xAI news (scraping) |
+
+#### CLI Watcher Control
+
+You can also enable/disable watchers directly via CLI flags. These take precedence over configuration files:
+
+```bash
+# Enable only specific watchers (disables all others)
+llm-watch --enable-watcher ollama_models --enable-watcher tldr_ai
+
+# Disable specific watchers (enables all others)
+llm-watch --disable-watcher meta_ai_blog_scrape --disable-watcher xai_news_scrape
+
+# Combine with config file: CLI options override config
+llm-watch --config-file my_config.yaml --disable-watcher tldr_ai
+```
+
+#### Config File Examples
+
+See [llmwatch.yaml.example](llmwatch.yaml.example) and [llmwatch.json.example](llmwatch.json.example) for complete examples.
+
+**Example: Enable only core watchers**
+```yaml
+watchers:
+  enabled:
+    - ollama_models
+    - huggingface_trending
+    - tldr_ai
+    - neuron_feed
+```
+
+**Example: Disable scrape watchers**
+```yaml
+watchers:
+  disabled:
+    - meta_ai_blog_scrape
+    - anthropic_news_scrape
+    - mistral_news_scrape
+    - xai_news_scrape
 ```
 
 ### Read Tracking

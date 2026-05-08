@@ -44,6 +44,9 @@ class Orchestrator:
     output_dir:
         Directory to write the generated Markdown report.  Defaults to the
         current working directory.  Pass ``None`` to suppress file output.
+    enabled_watchers:
+        Optional set of watcher agent names to enable. If provided, only these
+        watchers will be run. If ``None`` (default), all watchers are run.
     """
 
     def __init__(
@@ -53,11 +56,13 @@ class Orchestrator:
         watcher_options: dict[str, Any] | None = None,
         lookup_options: dict[str, Any] | None = None,
         editor_options: dict[str, Any] | None = None,
+        enabled_watchers: set[str] | None = None,
     ) -> None:
         self.parallel = parallel
         self.output_dir = output_dir
         self.watcher_options = watcher_options or {}
         self.lookup_options = lookup_options or {}
+        self.enabled_watchers = enabled_watchers
         opts = editor_options or {}
         # If the caller did not set "enabled", fall back to the env var so that
         # programmatic Orchestrator(...) users can enable the editor via
@@ -148,6 +153,17 @@ class Orchestrator:
         if not agents:
             logger.debug("Orchestrator: no agents for category '%s'", category)
             return []
+        
+        # Filter agents based on enabled_watchers if provided
+        if category == "watcher" and self.enabled_watchers is not None:
+            original_count = len(agents)
+            agents = [a for a in agents if a.name in self.enabled_watchers]
+            skipped_count = original_count - len(agents)
+            if skipped_count > 0:
+                logger.info(
+                    "Orchestrator: skipping %d disabled watcher(s)",
+                    skipped_count,
+                )
 
         logger.info(
             "Orchestrator: running %d %s agent(s): %s",

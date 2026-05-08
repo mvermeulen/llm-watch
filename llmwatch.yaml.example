@@ -1,0 +1,43 @@
+# llm-watch configuration file (YAML format)
+#
+# This file allows you to enable/disable specific watchers and configure
+# watcher behavior. Place this file as llmwatch.yaml in your working directory,
+# set LLMWATCH_CONFIG=/path/to/config.yaml, or use --config-file parameter.
+#
+# Available watchers:
+#   - ollama_models
+#   - huggingface_trending
+#   - huggingface_trending_papers
+#   - tldr_ai
+#   - neuron_feed
+#   - lastweekinai_podcast
+#   - openai_news_feed
+#   - google_ai_blog_feed
+#   - deepmind_blog_feed
+#   - microsoft_ai_blog_feed
+#   - aws_ml_blog_feed
+#   - qwen_blog_feed
+#   - meta_ai_blog_scrape
+#   - anthropic_news_scrape
+#   - mistral_news_scrape
+#   - xai_news_scrape
+
+watchers:
+  # Option 1: Specify which watchers to ENABLE (whitelist)
+  # Uncomment to use. Only these watchers will run.
+  # enabled:
+  #   - ollama_models
+  #   - huggingface_trending
+  #   - tldr_ai
+  #   - neuron_feed
+  #   - openai_news_feed
+  #   - google_ai_blog_feed
+
+  # Option 2: Specify which watchers to DISABLE (blacklist)
+  # Uncomment to use. All watchers EXCEPT these will run.
+  disabled:
+    # - tldr_ai
+    # - meta_ai_blog_scrape
+
+# Additional watcher options can be added here as needed
+# These are passed directly to watchers during execution
